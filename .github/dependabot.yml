@@ -1,0 +1,33 @@
+# Dependabot keeps our pinned dependencies current:
+#   - github-actions: bumps each SHA pin *and* its `# vX.Y.Z` comment together (the
+#     comment pinact enforces is the version map Dependabot reads) — closing the
+#     pin-hygiene loop with zizmor (pins) and pinact (verifies the comment).
+#   - uv: updates the workspace's Python deps from the root uv.lock.
+# A 7-day cooldown holds back freshly-published releases so a compromised one is
+# caught before we adopt it — supply-chain hygiene, enforced by our zizmor gate.
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      # Minor/patch ride one weekly PR; a major (potentially breaking) bump gets its own.
+      github-actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      # Same policy: routine minor/patch grouped, majors solo for deliberate review.
+      python:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    cooldown:
+      default-days: 7

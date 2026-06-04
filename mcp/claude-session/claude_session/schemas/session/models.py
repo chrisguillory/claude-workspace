@@ -283,6 +283,17 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   2.1.159->2.1.160 release delta is record-surface-empty; watch item: DesignSync (new
                   first-party built-in tool, binary-confirmed, not yet in JSONL — needs a typed input
                   on first capture). Extended CLAUDE_CODE_MAX_VERSION to 2.1.160.
+- Schema v0.2.41: Claude Code 2.1.162. UserRecord.promptSource (Literal queued|sdk|system|typed —
+                  prompt origin, 2.1.161+). NetworkDownError + NetworkDownConnection: the network-down
+                  api_error variant ({message, formatted, connection{code,message,isSSLError},
+                  isNetworkDown, rateLimits}, 2.1.161), a fourth error-union member ahead of EmptyError.
+                  queued_command attachment gained origin (UserRecordOrigin, 2.1.157); its commandMode
+                  tightened to Literal plan|prompt|task-notification. WorkflowToolInput.resumeFromRunId.
+                  UserRecordOrigin.kind tightened to the binary origin-producer set (auto-continuation|
+                  channel|coordinator|peer|task-notification). Enum Literals now carry the full binary
+                  producer set, not only JSONL-observed values — strict validation trips on genuine
+                  post-binary drift, not on values the installed binary already emits. Extended
+                  CLAUDE_CODE_MAX_VERSION to 2.1.162.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -488,6 +499,8 @@ __all__ = [
     'MonitorToolInput',
     'NestedMemoryAttachment',
     'NestedMemoryContent',
+    'NetworkDownConnection',
+    'NetworkDownError',
     'NetworkError',
     'NotebookEditToolInput',
     'OpenedFileInIdeAttachment',
@@ -620,9 +633,9 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.40'
+SCHEMA_VERSION = '0.2.41'
 CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
-CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.160')
+CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.162')
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -1158,14 +1171,15 @@ class WorkflowToolInput(StrictModel):
     Binary inputSchema: {script?, name?, scriptPath?, resumeFromRunId?, args?,
     description?, title?} — all optional (a refine requires one of script/name/scriptPath).
     The inline-script (`script`), on-disk-script (`scriptPath`), and saved-workflow (`name` + `args`)
-    forms all appear in observed data; resumeFromRunId/description/title remain binary-only and
-    unmodeled. `args` is an arbitrary caller-supplied JSON value passed verbatim to the run.
+    forms all appear in observed data; description/title remain binary-only and unmodeled.
+    `args` is an arbitrary caller-supplied JSON value passed verbatim to the run.
     """
 
     script: str | None = None
     name: str | None = None  # Saved-workflow name (the name+args form runs a registered workflow)
     args: pydantic.JsonValue | None = None  # Arbitrary caller-supplied input exposed to the workflow as `args`
     scriptPath: str | None = None  # Path to a persisted workflow script on disk; takes precedence over script/name
+    resumeFromRunId: str | None = None  # Resume a prior workflow run by id; completed agents replay cached results
 
 
 class RemoteTriggerToolInput(StrictModel):
@@ -1854,6 +1868,28 @@ class EmptyError(StrictModel):
     """
 
     type: None = None  # Always null when present; mirrors NetworkError.type
+
+
+class NetworkDownConnection(StrictModel):
+    """Connection diagnostics for the network-down api_error variant (Claude Code 2.1.161+)."""
+
+    code: Literal['ConnectionRefused', 'ECONNRESET', 'FailedToOpenSocket']
+    message: str
+    isSSLError: bool
+
+
+class NetworkDownError(StrictModel):
+    """Network-down api_error variant (Claude Code 2.1.161+).
+
+    Distinct from ApiError (status/headers), NetworkError (cause), and EmptyError
+    (null-type-only): identified by required formatted + connection + isNetworkDown.
+    """
+
+    message: str
+    formatted: str
+    connection: NetworkDownConnection
+    isNetworkDown: bool
+    rateLimits: None = None  # null in this variant
 
 
 # -- MCP Metadata (Claude Code 2.1.19+) ----------------------------------------
@@ -2696,9 +2732,12 @@ class ForkOrigin(StrictModel):
 
 
 class UserRecordOrigin(StrictModel):
-    """Origin metadata for user records (Claude Code 2.1.87+)."""
+    """Origin metadata shared by UserRecord.origin and QueuedCommandAttachment.origin (2.1.87+).
 
-    kind: str  # e.g., "task-notification"
+    kind is the closed origin-producer set; 'human' is consumer-guard-only (no producer).
+    """
+
+    kind: Literal['auto-continuation', 'channel', 'coordinator', 'peer', 'task-notification']  # last updated 2.1.161
 
 
 class UserRecord(BaseRecord):
@@ -2777,6 +2816,11 @@ class UserRecord(BaseRecord):
         None, description='MCP tool structured content metadata (Claude Code 2.1.19+)'
     )
     promptId: str | None = pydantic.Field(None, description='Prompt identifier (Claude Code 2.1.74+)')
+    promptSource: Literal['queued', 'sdk', 'system', 'typed'] | None = pydantic.Field(
+        None,
+        description="Prompt origin (Claude Code 2.1.161+): non-interactive→'sdk', isMeta→'system', "
+        "queued-replay→'queued', else 'typed'.",
+    )
     entrypoint: str | None = pydantic.Field(None, description='Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)')
     teamName: str | None = pydantic.Field(None, description='Team name when running in multi-agent team mode')
     agentName: str | None = pydantic.Field(None, description='Agent name within team (may be absent for lead agent)')
@@ -2980,8 +3024,8 @@ class ApiErrorSystemRecord(BaseRecord):
     agentName: str | None = None
     cause: ConnectionError | None = None  # Connection error details (for network failures)
     error: (
-        ApiError | NetworkError | EmptyError
-    )  # API error, network error, or empty error (EmptyError must be last - no required fields)
+        ApiError | NetworkError | NetworkDownError | EmptyError
+    )  # api/network/network-down/empty (EmptyError last — no required fields)
     retryInMs: float
     retryAttempt: int
     maxRetries: int
@@ -3647,7 +3691,7 @@ class QueuedCommandAttachment(StrictModel):
 
     type: Literal['queued_command']
     prompt: str | Sequence[TextContent | ImageContent]
-    commandMode: str
+    commandMode: Literal['plan', 'prompt', 'task-notification']  # last updated ≤2.1.156
     imagePasteIds: Sequence[int] | None = None  # Present when prompt contains pasted images
     source_uuid: str | None = pydantic.Field(
         None,
@@ -3656,6 +3700,9 @@ class QueuedCommandAttachment(StrictModel):
         'Set by the SDK replay path (Claude Code 2.1.20+ — `SDKUserMessageReplay` events '
         'when `replayUserMessages` is enabled). Note: snake_case in the wire schema, '
         'anomalous vs surrounding camelCase fields.',
+    )
+    origin: UserRecordOrigin | None = pydantic.Field(
+        None, description='Queued-command origin (Claude Code 2.1.157+); see UserRecordOrigin for the kind set.'
     )
 
 

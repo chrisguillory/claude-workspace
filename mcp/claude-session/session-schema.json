@@ -1,7 +1,7 @@
 {
   "$defs": {
     "AgentListingDeltaAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Agent registry changes \u2014 added/removed agent types for the Agent tool (Claude Code 2.1.90+).",
       "properties": {
         "type": {
@@ -51,7 +51,7 @@
       "type": "object"
     },
     "AgentNameRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Records the human-readable name assigned to a worker agent session.\n\nWritten to main session files to associate agent sessions with descriptive names.",
       "properties": {
         "type": {
@@ -77,7 +77,7 @@
       "type": "object"
     },
     "AgentOutputToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for AgentOutputTool - retrieves output from background agents.",
       "properties": {
         "agentId": {
@@ -116,7 +116,7 @@
       "type": "object"
     },
     "AgentProgressData": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Progress data for agent/subagent execution.",
       "properties": {
         "type": {
@@ -176,7 +176,7 @@
       "type": "object"
     },
     "AgentState": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "State of a background agent (may be running or completed).",
       "properties": {
         "status": {
@@ -218,7 +218,7 @@
       "type": "object"
     },
     "AgentTeammateSpawnedResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from Agent tool when spawning a teammate in team mode.",
       "properties": {
         "status": {
@@ -299,7 +299,7 @@
       "type": "object"
     },
     "AgentsKilledSystemRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "System record emitted when running subagents are killed (subtype=agents_killed, Claude Code 2.1.139+).\n\nCarries no payload beyond the base envelope; signals subagent termination\n(e.g., on Esc / session interrupt).",
       "properties": {
         "type": {
@@ -424,7 +424,7 @@
       "type": "object"
     },
     "AgentsRetrievalResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from retrieving multiple agent states.",
       "properties": {
         "retrieval_status": {
@@ -452,7 +452,7 @@
       "type": "object"
     },
     "AiTitleRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "AI-generated session title shown in the `/resume` UI.",
       "properties": {
         "type": {
@@ -478,7 +478,7 @@
       "type": "object"
     },
     "AlreadyReadFileAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Reminder injected when Claude re-Reads an unchanged file in the same session.\n\nCarries the cached snapshot the model has already seen so it can skip re-issuing\nthe Read tool. Shape mirrors FileAttachment exactly (filename + displayPath +\nwrapped FileAttachmentContent), so the nested types are reused directly.",
       "properties": {
         "type": {
@@ -507,7 +507,7 @@
       "type": "object"
     },
     "ApiError": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Complete API error information.",
       "properties": {
         "status": {
@@ -579,7 +579,7 @@
       "type": "object"
     },
     "ApiErrorDetail": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Nested API error details.",
       "properties": {
         "type": {
@@ -603,7 +603,7 @@
       "type": "object"
     },
     "ApiErrorResponse": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "API error response structure.",
       "properties": {
         "type": {
@@ -635,7 +635,7 @@
       "type": "object"
     },
     "ApiErrorSystemRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "System record for API errors (subtype=api_error).",
       "properties": {
         "type": {
@@ -842,6 +842,9 @@
               "$ref": "#/$defs/NetworkError"
             },
             {
+              "$ref": "#/$defs/NetworkDownError"
+            },
+            {
               "$ref": "#/$defs/EmptyError"
             }
           ],
@@ -877,7 +880,7 @@
       "type": "object"
     },
     "AskUserQuestionToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for AskUserQuestion tool - asks user multiple choice questions.\n\nFields:\n    questions: List of questions (1-4), each with question/header/options/multiSelect\n    answers: User answers (populated by permission component)",
       "properties": {
         "questions": {
@@ -910,7 +913,7 @@
       "type": "object"
     },
     "AskUserQuestionToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from AskUserQuestion tool execution.",
       "properties": {
         "questions": {
@@ -951,7 +954,7 @@
       "type": "object"
     },
     "AssistantRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Assistant message record.",
       "properties": {
         "type": {
@@ -1353,7 +1356,7 @@
       "type": "object"
     },
     "AsyncTaskLaunchResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from launching async Task (with or without output file tracking).",
       "properties": {
         "isAsync": {
@@ -1414,7 +1417,7 @@
       "type": "object"
     },
     "AttachmentRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Attachment record for non-message content injected into sessions.\n\nShares BaseRecord fields plus UserRecord metadata fields. Distinguished\nfrom UserRecord by having an 'attachment' field instead of 'message'.",
       "properties": {
         "type": {
@@ -1704,7 +1707,7 @@
       "type": "object"
     },
     "AutoModeAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Auto mode activation reminder.",
       "properties": {
         "type": {
@@ -1725,7 +1728,7 @@
       "type": "object"
     },
     "AutoModeExitAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Auto mode exited.",
       "properties": {
         "type": {
@@ -1741,7 +1744,7 @@
       "type": "object"
     },
     "AwaySummarySystemRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "System record for session recap (subtype=away_summary, Claude Code 2.1.108+).\n\nEmitted when returning to an idle session to summarize prior goal/state.\nControlled by `/recap` or `CLAUDE_CODE_ENABLE_AWAY_SUMMARY`.",
       "properties": {
         "type": {
@@ -1871,7 +1874,7 @@
       "type": "object"
     },
     "BackgroundTask": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Background task state from TaskOutput tool polling.",
       "properties": {
         "task_id": {
@@ -1964,7 +1967,7 @@
       "type": "object"
     },
     "BaseRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Base class for all session record types.",
       "properties": {
         "type": {
@@ -2018,7 +2021,7 @@
       "type": "object"
     },
     "BashOutputToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for BashOutput tool - retrieves background bash output.\n\nFields:\n    bash_id: Background task ID (required)\n    block: Whether to wait for completion\n    filter: Regex pattern to filter output\n    wait_up_to: Max seconds to wait (for blocking mode)",
       "properties": {
         "bash_id": {
@@ -2069,7 +2072,7 @@
       "type": "object"
     },
     "BashOutputToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from BashOutput tool (background shell output).\n\nDifferent from BashToolResult: requires shellId/command/status/exitCode\nbut does NOT have interrupted/isImage fields.",
       "properties": {
         "shellId": {
@@ -2149,7 +2152,7 @@
       "type": "object"
     },
     "BashProgressData": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Progress data for bash command execution.",
       "properties": {
         "type": {
@@ -2221,7 +2224,7 @@
       "type": "object"
     },
     "BashToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for Bash tool - executes shell commands.\n\nFields:\n    command: The shell command to execute (required)\n    description: Human-readable description in 5-10 words (usually present, but optional)\n    timeout: Timeout in milliseconds (max 600000, default 120000)\n    run_in_background: Run command asynchronously\n    dangerouslyDisableSandbox: Bypass sandbox protection (requires policy permission)",
       "properties": {
         "command": {
@@ -2287,7 +2290,7 @@
       "type": "object"
     },
     "BashToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from Bash tool execution.",
       "properties": {
         "stdout": {
@@ -2549,7 +2552,7 @@
       "type": "object"
     },
     "BridgeSessionRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Records the remote-control bridge association for a session.\n\nResumption-state sidecar (no uuid/timestamp), written alongside\nPermissionModeRecord. Binary: ``$.push({type:\"bridge-session\",sessionId:q,\nbridgeSessionId:...,lastSequenceNum:...})``; emitted by /remote-control\nbridge sessions. Distinct from BridgeStatusSystemRecord (a system subtype).",
       "properties": {
         "type": {
@@ -2580,7 +2583,7 @@
       "type": "object"
     },
     "BridgeStatusSystemRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "System record for remote-control bridge status (subtype=bridge_status, Claude Code 2.1.51+).",
       "properties": {
         "type": {
@@ -2766,7 +2769,7 @@
       "type": "string"
     },
     "CacheCreation": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Cache creation token breakdown.",
       "properties": {
         "ephemeral_5m_input_tokens": {
@@ -2786,7 +2789,7 @@
       "type": "object"
     },
     "CacheMissReasonMessagesChanged": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Cache miss because messages earlier in the conversation changed.\n\nCarries the count of input tokens that were not served from cache.",
       "properties": {
         "type": {
@@ -2807,7 +2810,7 @@
       "type": "object"
     },
     "CacheMissReasonModelChanged": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Cache miss because the model changed mid-session.\n\nCarries the count of input tokens that were not served from cache.\nServer-emitted via the cache-diagnosis-2026-04-07 Anthropic API beta\nheader, not present in the client binary (consistent with the other\nCacheMissReason variants).",
       "properties": {
         "type": {
@@ -2828,7 +2831,7 @@
       "type": "object"
     },
     "CacheMissReasonParamsChanged": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Cache miss because request parameters changed.\n\nCarries the count of input tokens that were not served from cache.",
       "properties": {
         "type": {
@@ -2849,7 +2852,7 @@
       "type": "object"
     },
     "CacheMissReasonPreviousMessageNotFound": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Cache miss because the previous message couldn't be located in the cache.",
       "properties": {
         "type": {
@@ -2865,7 +2868,7 @@
       "type": "object"
     },
     "CacheMissReasonSystemChanged": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Cache miss because the system prompt changed.\n\nCarries the count of input tokens that were not served from cache.",
       "properties": {
         "type": {
@@ -2886,7 +2889,7 @@
       "type": "object"
     },
     "CacheMissReasonToolsChanged": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Cache miss because tool definitions changed.\n\nCarries the count of input tokens that were not served from cache.",
       "properties": {
         "type": {
@@ -2907,7 +2910,7 @@
       "type": "object"
     },
     "CacheMissReasonUnavailable": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Cache miss because cache lookup was unavailable for this request.",
       "properties": {
         "type": {
@@ -2923,7 +2926,7 @@
       "type": "object"
     },
     "ClearThinkingEdit": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Applied context edit for clearing thinking blocks.",
       "properties": {
         "type": {
@@ -2949,7 +2952,7 @@
       "type": "object"
     },
     "CommandPermissionsAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Tool allow-list applied by a slash command.",
       "properties": {
         "type": {
@@ -2973,7 +2976,7 @@
       "type": "object"
     },
     "CompactBoundarySystemRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "System record for conversation compaction (subtype=compact_boundary).",
       "properties": {
         "type": {
@@ -3181,7 +3184,7 @@
       "type": "object"
     },
     "CompactFileReferenceAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "File reference injected after a compact operation.",
       "properties": {
         "type": {
@@ -3206,7 +3209,7 @@
       "type": "object"
     },
     "CompactMetadata": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Metadata for conversation compaction.",
       "properties": {
         "trigger": {
@@ -3291,7 +3294,7 @@
       "type": "object"
     },
     "CompanionIntroAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Companion creature introduction (/buddy feature).",
       "properties": {
         "type": {
@@ -3317,7 +3320,7 @@
       "type": "object"
     },
     "ConnectionError": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Connection error details for network failures.",
       "properties": {
         "code": {
@@ -3347,7 +3350,7 @@
       "type": "object"
     },
     "ContextManagement": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Context management metadata for message responses (Claude Code 2.0.51+).",
       "properties": {
         "applied_edits": {
@@ -3365,7 +3368,7 @@
       "type": "object"
     },
     "CronCreateToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for CronCreate tool - schedules recurring prompts.",
       "properties": {
         "cron": {
@@ -3409,7 +3412,7 @@
       "type": "object"
     },
     "CronCreateToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from CronCreate tool - confirms scheduled task creation.",
       "properties": {
         "id": {
@@ -3439,7 +3442,7 @@
       "type": "object"
     },
     "CronDeleteToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for CronDelete tool - cancels a scheduled cron job.",
       "properties": {
         "id": {
@@ -3454,14 +3457,14 @@
       "type": "object"
     },
     "CronListToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for CronList tool - lists scheduled cron jobs.",
       "properties": {},
       "title": "CronListToolInput",
       "type": "object"
     },
     "CustomTitleRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Custom title record for user-defined session names (minimal schema, no uuid).",
       "properties": {
         "type": {
@@ -3487,7 +3490,7 @@
       "type": "object"
     },
     "DateChangeAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Date rolled over mid-session \u2014 injected so Claude has the current date.",
       "properties": {
         "type": {
@@ -3508,7 +3511,7 @@
       "type": "object"
     },
     "DeferredToolsDeltaAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Deferred-tool registration changes for the tool-search system (Claude Code 2.1.120+).",
       "properties": {
         "type": {
@@ -3578,7 +3581,7 @@
       "type": "object"
     },
     "DiagnosticFile": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Diagnostics grouped by file URI.",
       "properties": {
         "uri": {
@@ -3601,7 +3604,7 @@
       "type": "object"
     },
     "DiagnosticItem": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A single LSP-style diagnostic.",
       "properties": {
         "message": {
@@ -3625,7 +3628,7 @@
       "type": "object"
     },
     "DiagnosticPosition": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "LSP-style position (line/character, 0-based).",
       "properties": {
         "line": {
@@ -3645,7 +3648,7 @@
       "type": "object"
     },
     "DiagnosticSeverityRange": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "LSP-style position range for a diagnostic.",
       "properties": {
         "start": {
@@ -3663,7 +3666,7 @@
       "type": "object"
     },
     "DiagnosticsAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "IDE diagnostics injected into the conversation.",
       "properties": {
         "type": {
@@ -3692,7 +3695,7 @@
       "type": "object"
     },
     "DocumentContent": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Document content block from user messages (PDF uploads, etc.).",
       "properties": {
         "type": {
@@ -3712,7 +3715,7 @@
       "type": "object"
     },
     "DocumentSource": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Document source data for document content (PDFs, etc.).",
       "properties": {
         "type": {
@@ -3738,7 +3741,7 @@
       "type": "object"
     },
     "DynamicSkillAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Skill discovered dynamically at a non-default location (Claude Code 2.1.x).",
       "properties": {
         "type": {
@@ -3771,7 +3774,7 @@
       "type": "object"
     },
     "EditToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for Edit tool.",
       "properties": {
         "file_path": {
@@ -3818,7 +3821,7 @@
       "type": "object"
     },
     "EditToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from Edit tool execution.",
       "properties": {
         "filePath": {
@@ -3872,7 +3875,7 @@
       "type": "object"
     },
     "EditedTextFileAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "File edited externally \u2014 snippet with line numbers shown to Claude.\n\ndisplayPath is rare (~2% of observed records, only on more recent\nClaude Code versions when the file is outside cwd); modeled optional.",
       "properties": {
         "type": {
@@ -3909,7 +3912,7 @@
       "type": "object"
     },
     "EmptyError": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Unspecified API error object (Claude Code 2.0.76+).\n\nEmitted either fields-less (``{}``) or as a bare ``{\"type\": null}`` -- a\nnetwork-error object whose ``cause`` was undefined at write time. The\noptional null ``type`` mirrors ``NetworkError.type`` / ``ApiError.type``.",
       "properties": {
         "type": {
@@ -3922,14 +3925,14 @@
       "type": "object"
     },
     "EnterPlanModeToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for EnterPlanMode tool (no parameters).",
       "properties": {},
       "title": "EnterPlanModeToolInput",
       "type": "object"
     },
     "EnterPlanModeToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from EnterPlanMode tool execution.",
       "properties": {
         "message": {
@@ -3944,7 +3947,7 @@
       "type": "object"
     },
     "EnterWorktreeToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for EnterWorktree tool - creates an isolated git worktree.",
       "properties": {
         "name": {
@@ -3976,7 +3979,7 @@
       "type": "object"
     },
     "EnterWorktreeToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from EnterWorktree tool - confirms worktree creation.",
       "properties": {
         "worktreePath": {
@@ -4001,7 +4004,7 @@
       "type": "object"
     },
     "ExitPlanModeToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for ExitPlanMode tool - exits planning mode.\n\nNote: This tool can be invoked with empty input {} or with plan/launchSwarm.\nThe empty variant signals plan approval request.\n\nFields:\n    plan: Plan content in markdown (optional)\n    launchSwarm: Whether to launch swarm agents (optional)\n    allowedPrompts: Prompt-based permission requests (tool + prompt pairs)\n    pushToRemote: Whether to push plan to remote Claude.ai session",
       "properties": {
         "plan": {
@@ -4072,7 +4075,7 @@
       "type": "object"
     },
     "ExitPlanModeToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from ExitPlanMode tool execution.",
       "properties": {
         "plan": {
@@ -4110,7 +4113,7 @@
       "type": "object"
     },
     "ExitWorktreeToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for ExitWorktree tool - exits the active worktree session (Claude Code 2.1.x).",
       "properties": {
         "action": {
@@ -4141,7 +4144,7 @@
       "type": "object"
     },
     "ExitWorktreeToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from ExitWorktree tool - confirms worktree exit (keep or remove).",
       "properties": {
         "action": {
@@ -4202,7 +4205,7 @@
       "type": "object"
     },
     "FastMcpMeta": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "fastmcp-framework metadata surfaced on MCP tool results (Claude Code 2.1.118+).\n\nWritten by Python MCP servers built on the fastmcp library. Claude Code\nforwards these `_meta.fastmcp` keys through to the session record.",
       "properties": {
         "wrap_result": {
@@ -4217,7 +4220,7 @@
       "type": "object"
     },
     "FileAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Generic file reference attached to the conversation.",
       "properties": {
         "type": {
@@ -4246,7 +4249,7 @@
       "type": "object"
     },
     "FileAttachmentContent": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Content wrapper for FileAttachment \u2014 carries the underlying text file.",
       "properties": {
         "type": {
@@ -4266,7 +4269,7 @@
       "type": "object"
     },
     "FileAttachmentFileContent": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "File content payload nested inside FileAttachment.content.",
       "properties": {
         "filePath": {
@@ -4300,7 +4303,7 @@
       "type": "object"
     },
     "FileBackupInfo": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Backup information for a tracked file.",
       "properties": {
         "backupFileName": {
@@ -4332,7 +4335,7 @@
       "type": "object"
     },
     "FileHistorySnapshot": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Snapshot data for file history tracking.",
       "properties": {
         "messageId": {
@@ -4360,7 +4363,7 @@
       "type": "object"
     },
     "FileHistorySnapshotRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "File history snapshot record (different schema from regular records).",
       "properties": {
         "type": {
@@ -4390,7 +4393,7 @@
       "type": "object"
     },
     "FileInfo": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "File information from Read tool (text files).",
       "properties": {
         "filePath": {
@@ -4424,7 +4427,7 @@
       "type": "object"
     },
     "ForkOrigin": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Backpointer to the source session/message a forked session branched from.",
       "properties": {
         "sessionId": {
@@ -4444,7 +4447,7 @@
       "type": "object"
     },
     "GlobToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for Glob tool - file pattern matching.\n\nFields:\n    pattern: Glob pattern to match files (e.g., \"**/*.py\")\n    path: Directory to search in (defaults to cwd)\n    limit: Max number of files to return (Claude Code 2.1.100+)",
       "properties": {
         "pattern": {
@@ -4482,7 +4485,7 @@
       "type": "object"
     },
     "GlobToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from Glob/file search tool execution.",
       "properties": {
         "mode": {
@@ -4554,7 +4557,7 @@
       "type": "object"
     },
     "GrepToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for Grep tool - searches file contents using ripgrep.\n\nFields:\n    pattern: Regex pattern to search for (required)\n    path: Directory or file to search in (defaults to cwd)\n    output_mode: content | files_with_matches | count\n    glob: Glob pattern to filter files (e.g., \"*.py\")\n    type: File type filter (e.g., \"py\", \"js\")\n    multiline: Enable multiline regex mode\n    head_limit: Limit output to first N results\n    offset: Skip first N results\n    context_lines: Number of context lines (alternative to -C)\n    flags: String-format flags (e.g., \"-i\")\n    grep: Alternative flag format (e.g., \"-n\")\n    Hyphenated flags: -n (line numbers), -A/-B/-C (context), -i (case insensitive)",
       "properties": {
         "pattern": {
@@ -4796,7 +4799,7 @@
       "type": "object"
     },
     "GrepToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from Grep/content search tool execution.",
       "properties": {
         "mode": {
@@ -4889,7 +4892,7 @@
       "type": "object"
     },
     "HandoffCommandResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from handoff command execution.",
       "properties": {
         "success": {
@@ -4919,7 +4922,7 @@
       "type": "object"
     },
     "HookAdditionalContextAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Hook returned additional context to inject into the conversation.",
       "properties": {
         "type": {
@@ -4965,7 +4968,7 @@
       "type": "object"
     },
     "HookBlockingErrorAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Hook returned a blocking error \u2014 tool execution was halted.",
       "properties": {
         "type": {
@@ -5000,7 +5003,7 @@
       "type": "object"
     },
     "HookBlockingErrorData": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Nested error detail for hook_blocking_error.",
       "properties": {
         "blockingError": {
@@ -5020,7 +5023,7 @@
       "type": "object"
     },
     "HookCancelledAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Hook execution was cancelled (e.g., aborted before completion).",
       "properties": {
         "type": {
@@ -5061,7 +5064,7 @@
       "type": "object"
     },
     "HookInfo": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Information about a hook execution.",
       "properties": {
         "command": {
@@ -5088,7 +5091,7 @@
       "type": "object"
     },
     "HookNonBlockingErrorAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Hook returned a non-blocking error \u2014 tool continued.",
       "properties": {
         "type": {
@@ -5144,7 +5147,7 @@
       "type": "object"
     },
     "HookProgressData": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Progress data for hook execution.",
       "properties": {
         "type": {
@@ -5174,7 +5177,7 @@
       "type": "object"
     },
     "HookSuccessAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Hook executed successfully \u2014 result injected as session attachment.",
       "properties": {
         "type": {
@@ -5235,7 +5238,7 @@
       "type": "object"
     },
     "ImageContent": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Image content block from user messages.",
       "properties": {
         "type": {
@@ -5255,7 +5258,7 @@
       "type": "object"
     },
     "ImageDimensions": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Image dimensions.",
       "properties": {
         "originalWidth": {
@@ -5285,7 +5288,7 @@
       "type": "object"
     },
     "ImageFileInfo": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "File information from Read tool (image files).",
       "properties": {
         "type": {
@@ -5321,7 +5324,7 @@
       "type": "object"
     },
     "ImageSource": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Image source data for image content.",
       "properties": {
         "type": {
@@ -5353,7 +5356,7 @@
       "type": "object"
     },
     "InformationalSystemRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "System record for informational messages (subtype=informational).",
       "properties": {
         "type": {
@@ -5579,7 +5582,7 @@
       "type": "object"
     },
     "InvokedSkill": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A skill invocation record inside an InvokedSkillsAttachment.",
       "properties": {
         "name": {
@@ -5604,7 +5607,7 @@
       "type": "object"
     },
     "InvokedSkillsAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Skills that were actually invoked for this turn (Claude Code 2.1.119+).\n\nDistinct from dynamic_skill (discovery of a skill dir under cwd) and\nskill_listing (periodic catalog of available skills): this attachment is\nemitted when the user invokes one or more skills via /<skill-name>, and\ncarries the full skill content that was injected into the conversation.",
       "properties": {
         "type": {
@@ -5629,7 +5632,7 @@
     },
     "JsonValue": {},
     "KillShellMessageResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Alternative KillShell result with message format (snake_case shell_id).",
       "properties": {
         "message": {
@@ -5649,7 +5652,7 @@
       "type": "object"
     },
     "KillShellToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for KillShell tool - terminates a running shell.\n\nFields:\n    shell_id: ID of the shell to kill (required)",
       "properties": {
         "shell_id": {
@@ -5664,7 +5667,7 @@
       "type": "object"
     },
     "KillShellToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from KillShell tool execution.",
       "properties": {
         "success": {
@@ -5684,7 +5687,7 @@
       "type": "object"
     },
     "LSPToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for LSP tool - Language Server Protocol operations.\n\nFields:\n    operation: LSP operation to perform\n    filePath: Path to the file to operate on\n    line: Line number (1-based as shown in editors)\n    character: Character offset (1-based as shown in editors)",
       "properties": {
         "operation": {
@@ -5724,7 +5727,7 @@
       "type": "object"
     },
     "LSPToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from LSP tool execution.",
       "properties": {
         "operation": {
@@ -5758,7 +5761,7 @@
       "type": "object"
     },
     "LastPromptRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Records the user's last prompt text.\n\nTypically the final record in a session file. Claude Code 2.1.120+ also writes a\nplaceholder near session start with `lastPrompt` absent until the first user input.\nClaude Code 2.1.121+ adds `leafUuid` referencing the latest message UUID in this\nconversation branch (parallels SummaryRecord.leafUuid).",
       "properties": {
         "type": {
@@ -5803,7 +5806,7 @@
       "type": "object"
     },
     "ListMcpResourcesToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for ListMcpResourcesTool - lists available MCP resources.\n\nFields:\n    server: Filter by specific MCP server name (optional)",
       "properties": {
         "server": {
@@ -5823,7 +5826,7 @@
       "type": "object"
     },
     "LocalCommandSystemRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "System record for local command output (subtype=local_command).",
       "properties": {
         "type": {
@@ -6008,7 +6011,7 @@
       "type": "object"
     },
     "MCPSearchToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for MCPSearch tool - searches for MCP tools.\n\nFields:\n    query: Search query string, can use 'select:' prefix for exact tool selection\n    max_results: Maximum number of results to return (optional, can be int or string)",
       "properties": {
         "query": {
@@ -6059,7 +6062,7 @@
       "type": "object"
     },
     "McpInstructionsDeltaAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "MCP server instruction changes (added/removed tool descriptions).",
       "properties": {
         "type": {
@@ -6099,7 +6102,7 @@
       "type": "object"
     },
     "McpMeta": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "MCP tool metadata wrapper (Claude Code 2.1.19+).\n\nNew in 2.1.19: Claude Code extracts structured content from MCP tool\nresults that return valid JSON and surfaces it here for easier access.\n\nDUPLICATION: The same data appears both here (as parsed dict) AND in\ntool_result.content (as JSON string). This is a convenience feature\nfor programmatic access without parsing.\n\nNOT BACKFILLED: Old sessions retain the old format (mcpMeta=None).\nWhen you resume an old session, new tool calls get mcpMeta but old\nrecords are not updated. Both patterns can coexist in the same file.\n\nOnly populated for MCP tools returning JSON - tools returning plain text\n(like Perplexity) do not populate this field.\n\nIn 2.1.118+ the `_meta` field is no longer always empty: Claude Code began\nforwarding framework-level metadata (e.g. fastmcp.wrap_result) written\nby the MCP server into the session record.",
       "properties": {
         "_meta": {
@@ -6129,7 +6132,7 @@
       "type": "object"
     },
     "McpMetaMetadata": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Implementation-framework metadata namespace on MCP tool results.\n\nCorresponds to the MCP spec's `_meta` field, which servers use to\nattach implementation-specific data. Currently only fastmcp is observed;\nother MCP frameworks (FastMCP-TS, mcp-go, etc.) may add sibling keys here.",
       "properties": {
         "fastmcp": {
@@ -6148,7 +6151,7 @@
       "type": "object"
     },
     "McpProgressCompletedData": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Progress data for MCP tool completion.",
       "properties": {
         "type": {
@@ -6185,7 +6188,7 @@
       "type": "object"
     },
     "McpProgressFailedData": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Progress data for MCP tool failure.",
       "properties": {
         "type": {
@@ -6222,7 +6225,7 @@
       "type": "object"
     },
     "McpProgressStartedData": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Progress data for MCP tool start.",
       "properties": {
         "type": {
@@ -6254,7 +6257,7 @@
       "type": "object"
     },
     "McpResource": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A single MCP resource from ListMcpResourcesTool.",
       "properties": {
         "name": {
@@ -6301,7 +6304,7 @@
       "type": "object"
     },
     "McpResourceContent": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A single resource content item from ReadMcpResourceTool.",
       "properties": {
         "uri": {
@@ -6326,7 +6329,7 @@
       "type": "object"
     },
     "Message": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A message within a record.",
       "properties": {
         "role": {
@@ -6527,7 +6530,7 @@
       "type": "object"
     },
     "MessageDiagnostics": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Diagnostic metadata about request handling (Claude Code 2.1.119+).\n\nEmitted via the `cache-diagnosis-2026-04-07` Anthropic API beta header.\nCurrently always reports prompt-cache outcome. May expand to other\ndiagnostic categories in future versions.",
       "properties": {
         "cache_miss_reason": {
@@ -6576,7 +6579,7 @@
       "type": "object"
     },
     "MicrocompactBoundarySystemRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "System record for micro-compaction (subtype=microcompact_boundary, Claude Code 2.1.9+).",
       "properties": {
         "type": {
@@ -6765,7 +6768,7 @@
       "type": "object"
     },
     "MicrocompactMetadata": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Metadata for micro-compaction (Claude Code 2.1.9+).",
       "properties": {
         "trigger": {
@@ -6806,7 +6809,7 @@
       "type": "object"
     },
     "MonitorToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for Monitor tool - streams events from a long-running background script (Claude Code 2.1.98+).",
       "properties": {
         "description": {
@@ -6850,7 +6853,7 @@
       "type": "object"
     },
     "NestedMemoryAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Nested CLAUDE.md / memory file discovered under cwd.",
       "properties": {
         "type": {
@@ -6879,7 +6882,7 @@
       "type": "object"
     },
     "NestedMemoryContent": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Nested CLAUDE.md content payload.",
       "properties": {
         "path": {
@@ -6926,8 +6929,72 @@
       "title": "NestedMemoryContent",
       "type": "object"
     },
+    "NetworkDownConnection": {
+      "additionalProperties": false,
+      "description": "Connection diagnostics for the network-down api_error variant (Claude Code 2.1.161+).",
+      "properties": {
+        "code": {
+          "enum": [
+            "ConnectionRefused",
+            "ECONNRESET",
+            "FailedToOpenSocket"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "isSSLError": {
+          "title": "Issslerror",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "isSSLError"
+      ],
+      "title": "NetworkDownConnection",
+      "type": "object"
+    },
+    "NetworkDownError": {
+      "additionalProperties": false,
+      "description": "Network-down api_error variant (Claude Code 2.1.161+).\n\nDistinct from ApiError (status/headers), NetworkError (cause), and EmptyError\n(null-type-only): identified by required formatted + connection + isNetworkDown.",
+      "properties": {
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "formatted": {
+          "title": "Formatted",
+          "type": "string"
+        },
+        "connection": {
+          "$ref": "#/$defs/NetworkDownConnection"
+        },
+        "isNetworkDown": {
+          "title": "Isnetworkdown",
+          "type": "boolean"
+        },
+        "rateLimits": {
+          "default": null,
+          "title": "Ratelimits",
+          "type": "null"
+        }
+      },
+      "required": [
+        "message",
+        "formatted",
+        "connection",
+        "isNetworkDown"
+      ],
+      "title": "NetworkDownError",
+      "type": "object"
+    },
     "NetworkError": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Network error wrapper (for connection failures).",
       "properties": {
         "cause": {
@@ -6946,7 +7013,7 @@
       "type": "object"
     },
     "NotebookEditToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for NotebookEdit tool - edits Jupyter notebook cells.\n\nFields:\n    notebook_path: Absolute path to the .ipynb file (required)\n    new_source: New source content for the cell (required)\n    cell_id: ID of cell to edit (optional)\n    cell_type: Type of cell - code or markdown\n    edit_mode: replace | insert | delete",
       "properties": {
         "notebook_path": {
@@ -7010,7 +7077,7 @@
       "type": "object"
     },
     "OpenedFileInIdeAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "File opened in the connected IDE (VSCode/JetBrains).",
       "properties": {
         "type": {
@@ -7042,7 +7109,7 @@
       "type": "object"
     },
     "OutputTokensDetails": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Output-token breakdown (Anthropic API usage passthrough).\n\nServer-emitted in message.usage; not a client-binary literal (same\nserver-diagnostic precedent as CacheMissReason).",
       "properties": {
         "thinking_tokens": {
@@ -7057,7 +7124,7 @@
       "type": "object"
     },
     "PatchHunk": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A single hunk in a git-style patch.",
       "properties": {
         "oldStart": {
@@ -7107,7 +7174,7 @@
       "type": "string"
     },
     "PdfFileInfo": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "File information from Read tool (PDF files).",
       "properties": {
         "filePath": {
@@ -7131,7 +7198,7 @@
       "type": "object"
     },
     "PermissionModeRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Records the active permission mode for a session.\n\nDoes NOT inherit from BaseRecord -- minimal schema with no uuid/timestamp.",
       "properties": {
         "type": {
@@ -7164,7 +7231,7 @@
       "type": "object"
     },
     "PlanFileReferenceAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Plan file content referenced in the conversation.",
       "properties": {
         "type": {
@@ -7189,7 +7256,7 @@
       "type": "object"
     },
     "PlanModeAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Plan mode reminder \u2014 injected while plan mode is active (Claude Code 2.1.112+).",
       "properties": {
         "type": {
@@ -7224,7 +7291,7 @@
       "type": "object"
     },
     "PlanModeExitAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "User exited plan mode \u2014 recorded whether the plan file was written.",
       "properties": {
         "type": {
@@ -7256,7 +7323,7 @@
       "type": "object"
     },
     "PlanModeReentryAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "User re-entered plan mode with a previously saved plan (Claude Code 2.1.112+).",
       "properties": {
         "type": {
@@ -7276,7 +7343,7 @@
       "type": "object"
     },
     "PrLinkRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "PR link record created when Claude Code opens a pull request.",
       "properties": {
         "type": {
@@ -7317,7 +7384,7 @@
       "type": "object"
     },
     "PreservedCompactMessages": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Preserved-message anchors carried across a compaction.",
       "properties": {
         "anchorUuid": {
@@ -7348,7 +7415,7 @@
       "type": "object"
     },
     "PreservedCompactSegment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Anchor UUIDs identifying the conversation segment preserved across an auto-compact.",
       "properties": {
         "headUuid": {
@@ -7373,7 +7440,7 @@
       "type": "object"
     },
     "ProgressRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Progress record for tracking long-running operations (Claude Code 2.1.9+).",
       "properties": {
         "type": {
@@ -7545,7 +7612,7 @@
       "type": "object"
     },
     "PromptPermission": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A prompt-based permission request in ExitPlanMode.",
       "properties": {
         "tool": {
@@ -7565,7 +7632,7 @@
       "type": "object"
     },
     "PushNotificationToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for PushNotification tool - sends a desktop/mobile notification (Claude Code 2.1.110+).",
       "properties": {
         "message": {
@@ -7586,7 +7653,7 @@
       "type": "object"
     },
     "QueryUpdateData": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Progress data for search query update (Claude Code 2.1.9+).",
       "properties": {
         "type": {
@@ -7607,7 +7674,7 @@
       "type": "object"
     },
     "QuestionAnnotation": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Annotation on a user's answer to a question (Claude Code 2.1.45+).",
       "properties": {
         "markdown": {
@@ -7639,7 +7706,7 @@
       "type": "object"
     },
     "QuestionOption": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A single option in a user question.",
       "properties": {
         "label": {
@@ -7683,7 +7750,7 @@
       "type": "object"
     },
     "QueueOperationRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Queue operation record (minimal schema, no uuid).",
       "properties": {
         "type": {
@@ -7776,7 +7843,7 @@
       "type": "object"
     },
     "QueuedCommandAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "User command queued while Claude was working. prompt may be str or content blocks.",
       "properties": {
         "type": {
@@ -7806,6 +7873,11 @@
           "title": "Prompt"
         },
         "commandMode": {
+          "enum": [
+            "plan",
+            "prompt",
+            "task-notification"
+          ],
           "title": "Commandmode",
           "type": "string"
         },
@@ -7836,6 +7908,18 @@
           "default": null,
           "description": "UUID of the source message that triggered this queued command. Rare (1/355 globally observed); only seen with commandMode=\"prompt\". Set by the SDK replay path (Claude Code 2.1.20+ \u2014 `SDKUserMessageReplay` events when `replayUserMessages` is enabled). Note: snake_case in the wire schema, anomalous vs surrounding camelCase fields.",
           "title": "Source Uuid"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UserRecordOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Queued-command origin (Claude Code 2.1.157+); see UserRecordOrigin for the kind set."
         }
       },
       "required": [
@@ -7847,7 +7931,7 @@
       "type": "object"
     },
     "ReadFileUnchangedFileInfo": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "File info for Read tool 'file_unchanged' variant \u2014 file content unchanged since last read.",
       "properties": {
         "filePath": {
@@ -7861,7 +7945,7 @@
       "type": "object"
     },
     "ReadFileUnchangedToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from Read tool when file is unchanged since last read (Claude Code 2.1.x).",
       "properties": {
         "type": {
@@ -7881,7 +7965,7 @@
       "type": "object"
     },
     "ReadImageToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from Read tool execution (image files).",
       "properties": {
         "type": {
@@ -7901,7 +7985,7 @@
       "type": "object"
     },
     "ReadMcpResourceToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for ReadMcpResourceTool - reads a specific MCP resource.\n\nFields:\n    server: MCP server name (required)\n    uri: Resource URI to read (required)",
       "properties": {
         "server": {
@@ -7921,7 +8005,7 @@
       "type": "object"
     },
     "ReadMcpResourceToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from ReadMcpResourceTool execution.",
       "properties": {
         "contents": {
@@ -7939,7 +8023,7 @@
       "type": "object"
     },
     "ReadPartsFileInfo": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "File info for Read tool 'parts' variant \u2014 PDF split into per-page tool-result files.",
       "properties": {
         "filePath": {
@@ -7967,7 +8051,7 @@
       "type": "object"
     },
     "ReadPartsToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from Read tool execution (large PDF split into parts) (Claude Code 2.1.x).",
       "properties": {
         "type": {
@@ -7987,7 +8071,7 @@
       "type": "object"
     },
     "ReadPdfToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from Read tool execution (PDF files).",
       "properties": {
         "type": {
@@ -8007,7 +8091,7 @@
       "type": "object"
     },
     "ReadTextToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from Read tool execution (text files).",
       "properties": {
         "type": {
@@ -8027,7 +8111,7 @@
       "type": "object"
     },
     "ReadToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for Read tool.\n\nFields:\n    file_path: Absolute path to the file to read\n    limit: Maximum number of lines to read (for large files)\n    offset: Line number to start reading from (1-indexed)",
       "properties": {
         "file_path": {
@@ -8083,7 +8167,7 @@
       "type": "object"
     },
     "RemoteTriggerToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for the RemoteTrigger tool \u2014 claude.ai routines API (Claude Code 2.1.81+).\n\nBinary inputSchema: {action: enum[list|get|create|update|run] (required),\ntrigger_id?, body?}. Only `action` appears in observed session data\n(`{\"action\": \"list\"}`), so it alone is modeled.",
       "properties": {
         "action": {
@@ -8105,7 +8189,7 @@
       "type": "object"
     },
     "SavedHookContextRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Saved hook context record for persisting hook output across session boundaries.",
       "properties": {
         "type": {
@@ -8207,7 +8291,7 @@
       "type": "object"
     },
     "ScheduleWakeupToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for ScheduleWakeup tool - arms a /loop dynamic-mode wake heartbeat.\n\ndelaySeconds is the API contract type (zod number, clamped to [60, 3600]\nby the runtime).",
       "properties": {
         "prompt": {
@@ -8232,7 +8316,7 @@
       "type": "object"
     },
     "ScheduledTaskFireSystemRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "System record for scheduled task execution (subtype=scheduled_task_fire, Claude Code 2.1.85+).\n\nEmitted as a transcript marker when /loop or CronCreate tasks fire.",
       "properties": {
         "type": {
@@ -8398,7 +8482,7 @@
       "type": "object"
     },
     "SearchResultsReceivedData": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Progress data for web search results received (Claude Code 2.1.9+).",
       "properties": {
         "type": {
@@ -8424,7 +8508,7 @@
       "type": "object"
     },
     "SelectedLinesInIdeAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Lines selected in the connected IDE.",
       "properties": {
         "type": {
@@ -8469,7 +8553,7 @@
       "type": "object"
     },
     "SendMessageLegacyToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Pre-refactor SendMessage wire shape (Claude Code 2.1.63): type/recipient/content, no to/message.",
       "properties": {
         "type": {
@@ -8507,7 +8591,7 @@
       "type": "object"
     },
     "SendMessageRouting": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Routing metadata for a sent message between team members.",
       "properties": {
         "sender": {
@@ -8561,7 +8645,7 @@
       "type": "object"
     },
     "SendMessageShutdownRequest": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Control-message body requesting a teammate shut down.",
       "properties": {
         "type": {
@@ -8589,7 +8673,7 @@
       "type": "object"
     },
     "SendMessageShutdownResponse": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Control-message body answering a shutdown request.",
       "properties": {
         "type": {
@@ -8627,7 +8711,7 @@
       "type": "object"
     },
     "SendMessageSimpleToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Simplified SendMessage input format (Claude Code 2.1.81+).",
       "properties": {
         "to": {
@@ -8647,7 +8731,7 @@
       "type": "object"
     },
     "SendMessageToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for SendMessage tool \u2014 post-backfill wire shape.\n\nClaude Code's `backfillObservableInput` derives top-level fields from `to`/`message`.\nFor an object `message` (control body): `type` = message.type, `recipient` = to (always),\n`request_id`/`approve` are copied up iff present, and `content` = `message.reason ?? message.feedback`\n(so `content` is absent when the control body carries neither). `reason`/`feedback` never appear as\ntop-level keys. For a string `message`: `type='message'`, `recipient` = to, `content` = message.\nThe raw two-field form is SendMessageSimpleToolInput.",
       "properties": {
         "to": {
@@ -8751,7 +8835,7 @@
       "type": "object"
     },
     "SendMessageToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from SendMessage tool - confirms message delivery between teammates.",
       "properties": {
         "success": {
@@ -8775,7 +8859,7 @@
       "type": "object"
     },
     "SendUserFileToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for the SendUserFile tool \u2014 delivers files to the user (Claude Code 2.1.142+).\n\nBinary inputSchema: {files: array(string).min(1) (required), status: enum[normal|proactive]\n(required), caption?}. Surfaces artifacts (screenshots, reports) \u2014 `proactive` pushes\nunprompted, `normal` accompanies a reply.",
       "properties": {
         "files": {
@@ -8814,7 +8898,7 @@
       "type": "object"
     },
     "ServerToolUse": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Server-side tool use tracking.",
       "properties": {
         "web_search_requests": {
@@ -8834,7 +8918,7 @@
       "type": "object"
     },
     "SessionModeRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Records the active session mode for a session.\n\nResumption-state sidecar written alongside PermissionModeRecord; does NOT\ninherit from BaseRecord -- minimal schema with no uuid/timestamp. Binary\ndomain is {'normal', 'coordinator'} (a boolean projection of\n``isCoordinatorMode()``); modeled Literal['normal'] per empirical-only\nmodeling, with 'coordinator' deferred until observed in JSONL.",
       "properties": {
         "type": {
@@ -8861,7 +8945,7 @@
       "type": "object"
     },
     "SimpleThinkingMetadata": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Simplified thinking metadata (Claude Code 2.1.19+).\n\nNew format that only specifies max thinking tokens without\nthe full level/disabled/triggers configuration.\nSee also ThinkingMetadata for the original full format.",
       "properties": {
         "maxThinkingTokens": {
@@ -8876,7 +8960,7 @@
       "type": "object"
     },
     "SkillListingAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Periodic listing of available skills (Claude Code 2.1.x).",
       "properties": {
         "type": {
@@ -8922,7 +9006,7 @@
       "type": "object"
     },
     "SkillToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for Skill tool.\n\nFields:\n    skill: Skill name to invoke (e.g., 'handoff', 'commit')\n    args: Optional arguments for the skill",
       "properties": {
         "skill": {
@@ -8949,7 +9033,7 @@
       "type": "object"
     },
     "SkillToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from Skill tool execution.",
       "properties": {
         "success": {
@@ -8984,7 +9068,7 @@
       "type": "object"
     },
     "StatusChange": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Status transition details.",
       "properties": {
         "from": {
@@ -9004,7 +9088,7 @@
       "type": "object"
     },
     "StopHookSummarySystemRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "System record for stop hook summary (subtype=stop_hook_summary, Claude Code 2.1.14+).",
       "properties": {
         "type": {
@@ -9249,7 +9333,7 @@
       "type": "object"
     },
     "SummaryRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Session summary record (minimal schema, no uuid/timestamp).\n\nNOTE: Zero occurrences observed in recent sessions (50+ files, 521K+ records).\nCompaction now uses UserRecord with isCompactSummary=True instead.\nThis type may be from an earlier Claude Code version. Kept for backward compatibility.",
       "properties": {
         "type": {
@@ -9275,7 +9359,7 @@
       "type": "object"
     },
     "SystemRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "System message record (standard system messages).",
       "properties": {
         "type": {
@@ -9356,7 +9440,7 @@
       "type": "object"
     },
     "TaskCreateToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for TaskCreate tool - creates a new task in the task list.\n\nFields:\n    subject: Brief title for the task (imperative form, e.g., \"Run tests\")\n    description: Detailed description of what needs to be done\n    activeForm: Present continuous form shown in spinner (e.g., \"Running tests\")\n    metadata: Arbitrary caller metadata; binary schema: v.record(v.string(), v.unknown()).optional()",
       "properties": {
         "subject": {
@@ -9401,7 +9485,7 @@
       "type": "object"
     },
     "TaskGetItem": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A task item in TaskGet results (full detail).",
       "properties": {
         "id": {
@@ -9452,7 +9536,7 @@
       "type": "object"
     },
     "TaskGetToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from TaskGet tool - single task with full details.",
       "properties": {
         "task": {
@@ -9466,7 +9550,7 @@
       "type": "object"
     },
     "TaskListItem": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A task item in TaskList results.",
       "properties": {
         "id": {
@@ -9516,14 +9600,14 @@
       "type": "object"
     },
     "TaskListToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for TaskList tool - lists all tasks (no parameters).",
       "properties": {},
       "title": "TaskListToolInput",
       "type": "object"
     },
     "TaskListToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from TaskList tool - list of all tasks.",
       "properties": {
         "tasks": {
@@ -9541,7 +9625,7 @@
       "type": "object"
     },
     "TaskOutputPollingResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from TaskOutput tool - polling background task state.",
       "properties": {
         "retrieval_status": {
@@ -9572,7 +9656,7 @@
       "type": "object"
     },
     "TaskOutputToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for TaskOutput tool - retrieves output from running/completed tasks.",
       "properties": {
         "task_id": {
@@ -9611,7 +9695,7 @@
       "type": "object"
     },
     "TaskReminderAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Task list reminder injected into the conversation (Claude Code 2.1.x).",
       "properties": {
         "type": {
@@ -9640,7 +9724,7 @@
       "type": "object"
     },
     "TaskReminderItem": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Task entry within a task_reminder attachment.",
       "properties": {
         "id": {
@@ -9728,7 +9812,7 @@
       "type": "object"
     },
     "TaskSingleItem": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A task item in TaskCreate/TaskUpdate results (minimal fields).",
       "properties": {
         "id": {
@@ -9748,7 +9832,7 @@
       "type": "object"
     },
     "TaskSingleToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from TaskCreate/TaskUpdate - single task confirmation.",
       "properties": {
         "task": {
@@ -9762,7 +9846,7 @@
       "type": "object"
     },
     "TaskStopToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from TaskStop tool execution.",
       "properties": {
         "message": {
@@ -9803,7 +9887,7 @@
       "type": "object"
     },
     "TaskToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for Task tool - launches subagent for autonomous tasks.\n\nFields:\n    prompt: Task instructions for the subagent (required)\n    subagent_type: Agent type - \"Explore\", \"general-purpose\", etc. (required)\n    description: Human-readable task description for UI (usually present but optional)\n    allowed_tools: Tools to grant the subagent (e.g., [\"Write\", \"Bash\"])\n    run_in_background: Run asynchronously, check with TaskOutput\n    model: Override model (e.g., \"haiku\", \"sonnet\")\n    resume: Agent ID to resume from previous execution\n    mode: Permission mode for the agent (Claude Code 2.1.19+)",
       "properties": {
         "description": {
@@ -9957,7 +10041,7 @@
       "type": "object"
     },
     "TaskToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from Task/agent tool execution.",
       "properties": {
         "status": {
@@ -10063,7 +10147,7 @@
       "type": "object"
     },
     "TaskToolStats": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Per-subagent tool-use statistics returned with TaskToolResult (Claude Code 2.1.x).",
       "properties": {
         "readCount": {
@@ -10108,7 +10192,7 @@
       "type": "object"
     },
     "TaskUpdateSuccessResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Alternative result format from TaskUpdate (success-based).",
       "properties": {
         "success": {
@@ -10175,7 +10259,7 @@
       "type": "object"
     },
     "TaskUpdateToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for TaskUpdate tool - updates an existing task.\n\nFields:\n    taskId: ID of the task to update (required)\n    status: New status (pending, in_progress, completed)\n    description: New description for the task\n    owner: Agent/worker name to assign the task to\n    addBlockedBy: Task IDs that block this task\n    metadata: Arbitrary caller metadata; binary schema: v.record(v.string(), v.unknown()).optional()",
       "properties": {
         "taskId": {
@@ -10299,7 +10383,7 @@
       "type": "object"
     },
     "TeamCreateToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for TeamCreate tool - creates a multi-agent team.",
       "properties": {
         "team_name": {
@@ -10331,7 +10415,7 @@
       "type": "object"
     },
     "TeamCreateToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from TeamCreate tool - confirms team creation.",
       "properties": {
         "team_name": {
@@ -10356,7 +10440,7 @@
       "type": "object"
     },
     "TextContent": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Text content block from user or assistant messages.",
       "properties": {
         "type": {
@@ -10377,7 +10461,7 @@
       "type": "object"
     },
     "ThinkingContent": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Thinking content block from assistant messages.",
       "properties": {
         "type": {
@@ -10403,7 +10487,7 @@
       "type": "object"
     },
     "ThinkingMetadata": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Thinking configuration metadata (full format, pre-2.1.19).\n\nThis is the original format with level/disabled/triggers configuration.\nSee also SimpleThinkingMetadata for the newer simplified format.",
       "properties": {
         "level": {
@@ -10444,7 +10528,7 @@
       "type": "object"
     },
     "ThinkingTrigger": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A thinking trigger with position information.",
       "properties": {
         "start": {
@@ -10470,7 +10554,7 @@
       "type": "object"
     },
     "TodoItem": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A single todo item from TodoWrite tool.",
       "properties": {
         "content": {
@@ -10500,7 +10584,7 @@
       "type": "object"
     },
     "TodoToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from TodoWrite tool execution.",
       "properties": {
         "oldTodos": {
@@ -10526,7 +10610,7 @@
       "type": "object"
     },
     "TodoWriteToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for TodoWrite tool - tracks task progress.\n\nFields:\n    todos: List of todo items, each with content/status/activeForm",
       "properties": {
         "todos": {
@@ -10544,7 +10628,7 @@
       "type": "object"
     },
     "TokenUsage": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Token usage information for assistant messages.",
       "properties": {
         "input_tokens": {
@@ -10668,7 +10752,7 @@
       "type": "object"
     },
     "ToolReferenceContent": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Tool reference content block from MCPSearch tool results (Claude Code 2.1.4+).\n\nAppears in tool_result content when MCPSearch returns matched MCP tools.",
       "properties": {
         "type": {
@@ -10689,7 +10773,7 @@
       "type": "object"
     },
     "ToolResultContent": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Tool result content block from user messages.",
       "properties": {
         "type": {
@@ -10758,7 +10842,7 @@
       "type": "object"
     },
     "ToolSearchToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from ToolSearch tool execution.",
       "properties": {
         "matches": {
@@ -10820,7 +10904,7 @@
       "type": "object"
     },
     "ToolUseCaller": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Caller metadata for tool use (Claude Code 2.1.4+).",
       "properties": {
         "type": {
@@ -10836,7 +10920,7 @@
       "type": "object"
     },
     "ToolUseContent": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Tool use content block from assistant messages.",
       "properties": {
         "type": {
@@ -11008,7 +11092,7 @@
       "type": "object"
     },
     "TurnDurationSystemRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "System record for turn duration tracking (subtype=turn_duration, Claude Code 2.1.1+).",
       "properties": {
         "type": {
@@ -11210,7 +11294,7 @@
       "type": "object"
     },
     "UltrathinkEffortAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Ultrathink effort-level indicator for the turn (Claude Code 2.1.139+).\n\nMarker injected when an ultrathink trigger raises the turn's thinking\neffort; carries no payload beyond the type tag.",
       "properties": {
         "type": {
@@ -11226,7 +11310,7 @@
       "type": "object"
     },
     "UsageIteration": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A single internal iteration within a turn's token usage (Claude Code 2.1.100+).\n\nPopulated when the turn runs multiple internal inference iterations\n(e.g., adaptive thinking with tool loops). All 6 fields are always present.",
       "properties": {
         "input_tokens": {
@@ -11266,7 +11350,7 @@
       "type": "object"
     },
     "UserQuestion": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A question to ask the user.",
       "properties": {
         "question": {
@@ -11299,7 +11383,7 @@
       "type": "object"
     },
     "UserRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "User message record.",
       "properties": {
         "type": {
@@ -11788,6 +11872,25 @@
           "description": "Prompt identifier (Claude Code 2.1.74+)",
           "title": "Promptid"
         },
+        "promptSource": {
+          "anyOf": [
+            {
+              "enum": [
+                "queued",
+                "sdk",
+                "system",
+                "typed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Prompt origin (Claude Code 2.1.161+): non-interactive\u2192'sdk', isMeta\u2192'system', queued-replay\u2192'queued', else 'typed'.",
+          "title": "Promptsource"
+        },
         "entrypoint": {
           "anyOf": [
             {
@@ -11858,10 +11961,17 @@
       "type": "object"
     },
     "UserRecordOrigin": {
-      "additionalProperties": true,
-      "description": "Origin metadata for user records (Claude Code 2.1.87+).",
+      "additionalProperties": false,
+      "description": "Origin metadata shared by UserRecord.origin and QueuedCommandAttachment.origin (2.1.87+).\n\nkind is the closed origin-producer set; 'human' is consumer-guard-only (no producer).",
       "properties": {
         "kind": {
+          "enum": [
+            "auto-continuation",
+            "channel",
+            "coordinator",
+            "peer",
+            "task-notification"
+          ],
           "title": "Kind",
           "type": "string"
         }
@@ -11873,7 +11983,7 @@
       "type": "object"
     },
     "WaitingForTaskData": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Progress data for waiting on a task.",
       "properties": {
         "type": {
@@ -11903,7 +12013,7 @@
       "type": "object"
     },
     "WebFetchToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for WebFetch tool - fetches URL content.\n\nFields:\n    url: URL to fetch (required)\n    prompt: Prompt to run on fetched content (required)",
       "properties": {
         "url": {
@@ -11923,7 +12033,7 @@
       "type": "object"
     },
     "WebFetchToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from WebFetch tool execution.",
       "properties": {
         "url": {
@@ -11963,7 +12073,7 @@
       "type": "object"
     },
     "WebSearchNestedResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from WebSearch tool with nested structure variant.",
       "properties": {
         "query": {
@@ -11998,7 +12108,7 @@
       "type": "object"
     },
     "WebSearchResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "A single web search result.",
       "properties": {
         "title": {
@@ -12018,7 +12128,7 @@
       "type": "object"
     },
     "WebSearchResultWrapper": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Wrapper for web search results with tool use ID (nested structure variant).",
       "properties": {
         "tool_use_id": {
@@ -12041,7 +12151,7 @@
       "type": "object"
     },
     "WebSearchToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for WebSearch tool - web search.\n\nFields:\n    query: Search query string (required)\n    allowed_domains: Only include results from these domains\n    blocked_domains: Exclude results from these domains",
       "properties": {
         "query": {
@@ -12086,7 +12196,7 @@
       "type": "object"
     },
     "WebSearchToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from WebSearch tool execution.",
       "properties": {
         "query": {
@@ -12128,7 +12238,7 @@
       "type": "object"
     },
     "WorkflowKeywordRequestAttachment": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Workflow-trigger keyword detected in the prompt (Claude Code 2.1.153+).\n\nMarker injected when a prompt's \"workflow\" keyword may trigger a dynamic\nworkflow; carries no payload beyond the type tag.",
       "properties": {
         "type": {
@@ -12144,8 +12254,8 @@
       "type": "object"
     },
     "WorkflowToolInput": {
-      "additionalProperties": true,
-      "description": "Input for the Workflow tool \u2014 multi-agent orchestration (Claude Code 2.1.146+).\n\nBinary inputSchema: {script?, name?, scriptPath?, resumeFromRunId?, args?,\ndescription?, title?} \u2014 all optional (a refine requires one of script/name/scriptPath).\nThe inline-script (`script`), on-disk-script (`scriptPath`), and saved-workflow (`name` + `args`)\nforms all appear in observed data; resumeFromRunId/description/title remain binary-only and\nunmodeled. `args` is an arbitrary caller-supplied JSON value passed verbatim to the run.",
+      "additionalProperties": false,
+      "description": "Input for the Workflow tool \u2014 multi-agent orchestration (Claude Code 2.1.146+).\n\nBinary inputSchema: {script?, name?, scriptPath?, resumeFromRunId?, args?,\ndescription?, title?} \u2014 all optional (a refine requires one of script/name/scriptPath).\nThe inline-script (`script`), on-disk-script (`scriptPath`), and saved-workflow (`name` + `args`)\nforms all appear in observed data; description/title remain binary-only and unmodeled.\n`args` is an arbitrary caller-supplied JSON value passed verbatim to the run.",
       "properties": {
         "script": {
           "anyOf": [
@@ -12193,13 +12303,25 @@
           ],
           "default": null,
           "title": "Scriptpath"
+        },
+        "resumeFromRunId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resumefromrunid"
         }
       },
       "title": "WorkflowToolInput",
       "type": "object"
     },
     "WorktreeSessionData": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Worktree session metadata embedded in WorktreeStateRecord.",
       "properties": {
         "originalCwd": {
@@ -12277,7 +12399,7 @@
       "type": "object"
     },
     "WorktreeStateRecord": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Records worktree state at the start of a worktree session (line 1 only).\n\nDoes NOT inherit from BaseRecord -- minimal schema with no uuid/timestamp.",
       "properties": {
         "type": {
@@ -12309,7 +12431,7 @@
       "type": "object"
     },
     "WriteToolInput": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Input for Write tool.",
       "properties": {
         "file_path": {
@@ -12328,7 +12450,7 @@
       "type": "object"
     },
     "WriteToolResult": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "description": "Result from Write tool execution.",
       "properties": {
         "type": {
@@ -12491,9 +12613,9 @@
   "$id": "https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json",
   "title": "Claude Code Session Record",
   "description": "Complete schema for Claude Code session JSONL records",
-  "x-schema-version": "0.2.40",
+  "x-schema-version": "0.2.41",
   "x-claude-code-compatibility": {
     "min": "2.0.35",
-    "max": "2.1.160"
+    "max": "2.1.162"
   }
 }
