@@ -143,23 +143,20 @@ Patches (alphabetical by name):
                     permissions for reading and writing. Claude uses this
                     instead of ``/tmp`` for intermediate files.
                     Statsig gate ``tengu_scratch``, default false.
-                    Short-circuits the gate-check function ``at()`` (which
-                    is the dedup'd ``isScratchpadEnabled``/``isScratchpadGateEnabled``
-                    JS site) to always return true, bypassing
-                    ``getFeatureValue_CACHED_MAY_BE_STALE``'s cache lookup.
-                    The standard gate-flip pattern (``!1`` → ``!0``) is
-                    insufficient here because ``cachedGrowthBookFeatures``
-                    in ``~/.claude.json`` typically has ``tengu_scratch:
-                    false``, which short-circuits to false BEFORE the
-                    patched default is consulted. The short-circuit
-                    replaces the entire function body with ``return!0``
-                    plus a length-padding comment.
-                    Flag introduced in 2.1.45 (last absent: 2.1.44). Call
-                    signature standardized to two-arg form between 2.1.114
-                    and 2.1.121 (verified). The same cache-override
-                    limitation applies to ``remember-skill`` (still ships
-                    with the simple gate-flip; switch to short-circuit if
-                    it doesn't activate).
+                    ``isScratchpadEnabled`` and ``isScratchpadGateEnabled`` are
+                    emitted as two separate functions with byte-identical bodies
+                    (``(){return <accessor>("tengu_scratch",!1)}``) but distinct
+                    minified names, so the patch keys on the name-independent
+                    body and hits both (2 sites). Each body is short-circuited to
+                    ``return!0`` (plus a length-padding comment); a plain
+                    gate-flip (``!1`` → ``!0``) is defeated by
+                    ``cachedGrowthBookFeatures`` in ``~/.claude.json``
+                    (``tengu_scratch: false`` resolves before the patched
+                    default).
+                    Anchor: ``(){return`` — the accessor call is destroyed by the
+                    patch, so it can't anchor detection; the surviving body
+                    prefix does.
+                    Flag introduced in 2.1.45 (last absent: 2.1.44).
 
     show-subagent-prompt-tools-response
                     [visibility] Expand completed subagent to show prompt, tool
@@ -180,12 +177,12 @@ Patches (alphabetical by name):
                     Tool calls appear as one-line summaries (tool name + args),
                     not full input/output.
                     Substitutes the four standalone ``T`` (isTranscriptMode)
-                    usages in IR7's JSX body with ``K`` (the verbose param):
-                    ``T&&J&&`` → ``K&&J&&`` (prompt), ``T?`` → ``K?`` (tools),
-                    ``T&&j&&`` → ``K&&j&&`` (response), ``!T&&`` → ``!K&&``
-                    (suppresses the "(ctrl+o to expand)" hint). The verbose
-                    tree follows the verbose param directly.
-                    Anchor: ``_8.createElement(IL5,{progressMessages:_,tools:q,verbose:K})``
+                    usages in the subagent-row JSX body with ``K`` (the verbose
+                    param): prompt (``T&&<p>&&`` → ``K&&<p>&&``), tools
+                    (``T?`` → ``K?``), response (``T&&<r>&&`` → ``K&&<r>&&``),
+                    and the "(ctrl+o to expand)" hint (``!T&&`` → ``!K&&``); the
+                    verbose tree then follows the verbose param directly.
+                    Anchor: ``F8.createElement(esO,{progressMessages:_,tools:q,verbose:K})``
                     (the verbose-tree React element invocation — interior
                     fragment that's stable across the substitution, so
                     patcher status detection works post-apply).
@@ -224,6 +221,29 @@ Empirical verification on 2.1.128 (2026-05-06)::
       original "Tool use rejected" bug no longer exists
 
 Version Log::
+
+    2.1.163 (2026-06-04)
+        Routine bug-fix release (managed version-range settings, /plugin
+        list, hook additionalContext). No changelog entry touches a live
+        patch — no obsoletions. Minified identifiers drifted again, and the
+        two patches deferred at 2.1.162 are now re-derived and applied.
+
+        Patch updates:
+        - force-429-retry-header / force-429-retry-status: re-derived. The
+          isClaudeAISubscriber/isEnterpriseSubscriber identifiers re-minified
+          Wq/odH → Lq/PdH. 1 site each, applied.
+        - hook-ask-no-override: clean apply (anchor + bytes stable since
+          2.1.109). 1 site.
+        - scratchpad: re-derived + re-anchored. The gate is emitted as two
+          byte-identical functions (isScratchpadEnabled /
+          isScratchpadGateEnabled) with distinct minified names; switched to
+          a name-independent body anchor (``(){return``) that hits both
+          (2 sites). Accessor M_ → J_. Resolves the 2.1.162 deferral.
+        - show-subagent-prompt-tools-response: re-derived. Full JSX re-map
+          (module w8 → F8, component vu5 → esO; plus R6→U6, bj_→FV_,
+          XO_→iP_, Z08→ri8, Mg→wn, F7H→MTH, V→N, EM→C2; locals D→f, j→J).
+          Strategy unchanged: 4-site T→K substitution. 1 site. Resolves the
+          2.1.162 deferral.
 
     2.1.162 (2026-06-04)
         Routine release train since 2.1.138 — the headline was the model jump
@@ -615,10 +635,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FIX,
         anchor=b'"x-should-retry"',
-        old=b'_==="true"&&(!Wq()||odH())',
-        new=b'_==="true"&&(!0/*Wq|odH*/)',
+        old=b'_==="true"&&(!Lq()||PdH())',
+        new=b'_==="true"&&(!0/*Lq|PdH*/)',
         window=200,
-        min_version=CCVersion('2.1.162'),
+        min_version=CCVersion('2.1.163'),
     ),
     PatchDef(
         name='force-429-retry-status',
@@ -633,10 +653,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FIX,
         anchor=b'"x-should-retry"',
-        old=b'if(H.status===429)return!Wq()||odH();',
-        new=b'if(H.status===429)return!0;/*Wq|odH*/',
+        old=b'if(H.status===429)return!Lq()||PdH();',
+        new=b'if(H.status===429)return!0;/*Lq|PdH*/',
         window=600,
-        min_version=CCVersion('2.1.162'),
+        min_version=CCVersion('2.1.163'),
     ),
     PatchDef(
         name='hook-ask-no-override',
@@ -652,37 +672,37 @@ PATCHES: Sequence[PatchDef] = (
         name='scratchpad',
         description='Enable session-scoped scratchpad directory with auto-permissions',
         kind=PatchKind.FEATURE,
-        anchor=b'function XHH(){return',
-        old=b'function XHH(){return M_("tengu_scratch",!1)}',
-        new=b'function XHH(){return!0/*scratchpad always*/}',
+        anchor=b'(){return',
+        old=b'(){return J_("tengu_scratch",!1)}',
+        new=b'(){return!0/*scratch always on*/}',
         window=50,
-        min_version=CCVersion('2.1.138'),
+        min_version=CCVersion('2.1.163'),
     ),
     PatchDef(
         name='show-subagent-prompt-tools-response',
         description='Expand completed subagent to show prompt, tool calls, and response when verbose=true',
         kind=PatchKind.VISIBILITY,
-        anchor=b'w8.createElement(vu5,{progressMessages:_,tools:q,verbose:K})',
+        anchor=b'F8.createElement(esO,{progressMessages:_,tools:q,verbose:K})',
         old=(
-            b'!1,T&&D&&w8.createElement(R6,null,w8.createElement(bj_,{prompt:D,theme:O})),'
-            b'T?w8.createElement(XO_,null,w8.createElement(vu5,{progressMessages:_,tools:q,verbose:K})):null,'
-            b'T&&j&&j.length>0&&w8.createElement(R6,null,w8.createElement(Z08,{content:j,theme:O})),'
-            b'w8.createElement(R6,{height:1},w8.createElement(Mg,{message:X,lookups:F7H,addMargin:!1,tools:q,'
+            b'!1,T&&f&&F8.createElement(U6,null,F8.createElement(FV_,{prompt:f,theme:O})),'
+            b'T?F8.createElement(iP_,null,F8.createElement(esO,{progressMessages:_,tools:q,verbose:K})):null,'
+            b'T&&J&&J.length>0&&F8.createElement(U6,null,F8.createElement(ri8,{content:J,theme:O})),'
+            b'F8.createElement(U6,{height:1},F8.createElement(wn,{message:X,lookups:MTH,addMargin:!1,tools:q,'
             b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!T&&w8.createElement(V,{dimColor:!0},"  ",w8.createElement(EM,null)))'
+            b'!T&&F8.createElement(N,{dimColor:!0},"  ",F8.createElement(C2,null)))'
         ),
         new=(
-            b'!1,K&&D&&w8.createElement(R6,null,w8.createElement(bj_,{prompt:D,theme:O})),'
-            b'K?w8.createElement(XO_,null,w8.createElement(vu5,{progressMessages:_,tools:q,verbose:K})):null,'
-            b'K&&j&&j.length>0&&w8.createElement(R6,null,w8.createElement(Z08,{content:j,theme:O})),'
-            b'w8.createElement(R6,{height:1},w8.createElement(Mg,{message:X,lookups:F7H,addMargin:!1,tools:q,'
+            b'!1,K&&f&&F8.createElement(U6,null,F8.createElement(FV_,{prompt:f,theme:O})),'
+            b'K?F8.createElement(iP_,null,F8.createElement(esO,{progressMessages:_,tools:q,verbose:K})):null,'
+            b'K&&J&&J.length>0&&F8.createElement(U6,null,F8.createElement(ri8,{content:J,theme:O})),'
+            b'F8.createElement(U6,{height:1},F8.createElement(wn,{message:X,lookups:MTH,addMargin:!1,tools:q,'
             b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!K&&w8.createElement(V,{dimColor:!0},"  ",w8.createElement(EM,null)))'
+            b'!K&&F8.createElement(N,{dimColor:!0},"  ",F8.createElement(C2,null)))'
         ),
         window=800,
-        min_version=CCVersion('2.1.138'),
+        min_version=CCVersion('2.1.163'),
     ),
 )
 
