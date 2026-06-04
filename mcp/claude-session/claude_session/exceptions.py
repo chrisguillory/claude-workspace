@@ -4,6 +4,7 @@ Domain-specific exceptions used across services.
 
 Exception Hierarchy:
     ClaudeSessionError (base)
+    ├── SessionRecordError (strict schema validation failed during load)
     ├── SessionResolutionError (lookup/resolution failures)
     │   ├── AmbiguousSessionError (prefix matches multiple sessions)
     │   └── SourceProjectConflictError (--source-project with auto-detection)
@@ -37,6 +38,7 @@ __all__ = [
     'SameProjectMoveError',
     'SessionDeletionError',
     'SessionMoveError',
+    'SessionRecordError',
     'SessionResolutionError',
     'SourceProjectConflictError',
 ]
@@ -44,6 +46,24 @@ __all__ = [
 
 class ClaudeSessionError(Exception):
     """Base exception for all claude-session errors."""
+
+
+class SessionRecordError(PickleByInitArgs, ClaudeSessionError):
+    """Raised when a session record fails strict schema validation during a load.
+
+    Names the file + line so the gap is locatable without reproducing. Under strict
+    mode this usually means a Claude Code field/value newer than the schema — run
+    validate_models.py to characterize, then model it and bump.
+    """
+
+    def __init__(self, file_path: Path, line_num: int, record_type: str | None) -> None:
+        self.file_path = file_path
+        self.line_num = line_num
+        self.record_type = record_type
+        super().__init__(
+            f'{file_path.name}:{line_num}: {record_type!r} record failed strict schema validation '
+            f'(likely a Claude Code field/value newer than the schema — run validate_models.py to characterize).'
+        )
 
 
 class SessionResolutionError(ClaudeSessionError):
