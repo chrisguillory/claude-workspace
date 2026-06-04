@@ -429,6 +429,13 @@ def index(
             help='Redis URL query params (passthrough to redis-py). e.g. "socket_timeout=120&socket_connect_timeout=120". Raise on slow hosts where indexing hits Redis timeouts.',
         ),
     ] = None,
+    include_timing: Annotated[
+        bool,
+        typer.Option(
+            '--include-timing/--no-include-timing',
+            help='Include pipeline timing in --format json (default: off, matching the MCP tool).',
+        ),
+    ] = False,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Index documents for search.
@@ -448,6 +455,7 @@ def index(
             chunk_timeout,
             embed_workers,
             redis_url_params,
+            include_timing,
             format,
         ),
     )
@@ -531,15 +539,19 @@ async def _info_async(collection_name: str, paths: Sequence[str], format: Output
         typer.echo(f'  Name: {collection.name}')
         if collection.description:
             typer.echo(f'  Description: {collection.description}')
+        typer.echo(f'  Created: {collection.created_at}')
         typer.echo()
 
         typer.secho('Embedding:', bold=True)
         typer.echo(f'  Provider: {embedding_info.provider}/{embedding_info.model}')
         typer.echo(f'  Dimensions: {embedding_info.dimensions}')
         typer.echo(f'  Batch size: {embedding_info.batch_size}')
+        if embedding_info.requests_per_minute is not None:
+            typer.echo(f'  Requests/min: {embedding_info.requests_per_minute}')
         typer.echo()
 
         typer.secho('Storage:', bold=True)
+        typer.echo(f'  Vector dim: {storage.vector_dimension}')
         typer.echo(f'  Points: {storage.points_count}')
         typer.echo(f'  Status: {storage.status}')
         typer.echo()
@@ -547,9 +559,15 @@ async def _info_async(collection_name: str, paths: Sequence[str], format: Output
         typer.secho('Content:', bold=True)
         typer.echo(f'  Chunks: {content.total_chunks}')
         typer.echo(f'  Files: {content.unique_files}')
+        typer.echo(f'  Supported types: {", ".join(content.supported_types)}')
         if content.by_file_type:
-            typer.echo(f'  Types: {dict(content.by_file_type)}')
+            typer.echo('  Types:')
+            for ftype, count in content.by_file_type.items():
+                typer.echo(f'    {ftype}: {count}')
         typer.echo()
+
+        if info_result.paths:
+            typer.echo(f'Scope: {", ".join(info_result.paths)}')
 
         if dashboard_url:
             typer.secho(f'Dashboard: {dashboard_url}', fg=typer.colors.CYAN)
@@ -587,8 +605,12 @@ async def _list_async(
             typer.echo('No indexed files found.')
             return
 
+        chunk_w = max(len(str(f.chunk_count)) for f in files)
+        type_w = max(len(f.file_type) for f in files)
         for f in files:
-            typer.echo(f'{f.chunk_count:4d} chunks  {f.file_type:<10s}  {f.path}')
+            typer.echo(f'{f.chunk_count:>{chunk_w}d} chunks  {f.file_type:<{type_w}s}  {f.path}')
+        if len(files) == limit:
+            typer.echo(f'(showing first {limit} — pass --limit for more)')
 
 
 async def _clear_async(
@@ -773,6 +795,7 @@ async def _index_async(
     chunk_timeout: int | None,
     embed_workers: int | None,
     redis_url_params: str | None,
+    include_timing: bool,
     format: OutputFormat,
 ) -> None:
     resolved_paths = resolve_index_paths([str(p) for p in paths])
@@ -851,6 +874,9 @@ async def _index_async(
                 redis_client=ctx.redis,
                 **index_overrides,
             )
+
+            if not include_timing:
+                result = result.__replace__(timing=None)
 
             if format == 'json':
                 typer.echo(json.dumps(result.model_dump(mode='json'), indent=2, default=str))
