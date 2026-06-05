@@ -191,8 +191,10 @@ class SessionInfoService:
 
         Looks up the (session_id, project_folder) entry in sessions.json, then verifies:
         1. Session state is 'active'
-        2. Process with that PID exists
-        3. Process creation time matches (guards against PID recycling)
+        2. The recorded (pid, process_created_at) anchor is still live via
+           ProcessHandle.is_alive() — recycle-safe (a reused PID whose create_time
+           drifted reads as dead). Legacy entries without an anchor fall back to a
+           bare alive-check.
 
         Args:
             session_id: Full session ID to check.
