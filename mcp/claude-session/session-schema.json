@@ -7177,7 +7177,7 @@
     },
     "NetworkDownError": {
       "additionalProperties": false,
-      "description": "Network-down api_error variant (Claude Code 2.1.161+).\n\nDistinct from ApiError (status/headers), NetworkError (cause), and EmptyError\n(null-type-only): identified by required formatted + connection + isNetworkDown.",
+      "description": "Request-diagnostic api_error envelope (Claude Code 2.1.161+).\n\nCovers network-down (connection = NetworkDownConnection, isNetworkDown true) and\nrequest-timeout (connection null, isNetworkDown false) -- the binary builds connection\nvia ``VU(H)``, which returns null when there is no socket-level failure. Distinct from\nApiError (status/headers), NetworkError (cause), EmptyError (null-type-only), and\nRetryableHttpError (has status): identified by formatted + isNetworkDown, no status.",
       "properties": {
         "message": {
           "title": "Message",
@@ -7188,7 +7188,14 @@
           "type": "string"
         },
         "connection": {
-          "$ref": "#/$defs/NetworkDownConnection"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkDownConnection"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "isNetworkDown": {
           "title": "Isnetworkdown",
@@ -13104,7 +13111,7 @@
   "$id": "https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json",
   "title": "Claude Code Session Record",
   "description": "Complete schema for Claude Code session JSONL records",
-  "x-schema-version": "0.2.42",
+  "x-schema-version": "0.2.43",
   "x-claude-code-compatibility": {
     "min": "2.0.35",
     "max": "2.1.163"
