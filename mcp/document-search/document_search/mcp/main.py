@@ -335,8 +335,8 @@ Args:
     min_score: Minimum cross-encoder relevance score. The reranker produces
         raw logits where negative = irrelevant, positive = relevant.
         Use 0.0 for "only relevant results", higher for stricter filtering.
-    snippet_chars: Truncate each hit's text to N characters (>= 1). Default
-        returns the full chunk text.
+    snippet_chars: Truncate each hit's text to N characters (>= 1), appending an
+        ellipsis when truncated. Default returns the full chunk text.
     search_timeout: Qdrant search timeout in seconds. Increase for large
         unfiltered collections (path="**"). Default uses client setting (30s).
 
@@ -421,7 +421,6 @@ Returns:
         else:
             raise NotImplementedError
 
-        # Fetch more candidates for reranking (3x over-fetch for quality, cap at 200)
         effective_limit = clamp_search_limit(limit)
         rerank_candidates = rerank_candidate_count(effective_limit)
 
