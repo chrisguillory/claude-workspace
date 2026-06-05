@@ -8,10 +8,58 @@
 #
 # IMPORTANT: Run `uv sync --all-groups` before committing to ensure
 # all dev dependencies (ruff, mypy, etc.) are installed.
+#
+# Hooks within each repo are ordered alphabetically by id.
 
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+        exclude: '\.(csv|tsv|pyi?)$'
+      - id: fix-byte-order-marker
+        exclude: '\.(csv|tsv|pyi?)$'
+      - id: mixed-line-ending
+        args: [--fix=no]
+        exclude: '\.(csv|tsv|pyi?)$'
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md, --markdown-linebreak-ext=markdown]
+        exclude: '\.(csv|tsv|pyi?)$'  # csv/tsv: legitimate CRLF (RFC 4180); py/pyi: handled by ruff
+
   - repo: local
     hooks:
+      - id: exception-safety-linter
+        name: exception-safety-linter
+        description: Check for exception handling anti-patterns
+        entry: ./linters/exception_safety_linter.py --report-unused-directives .
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: mypy
+        name: mypy
+        description: Run mypy type checker
+        entry: uv run mypy .
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: pinact
+        name: pinact
+        description: SHA-pinned actions must carry a # vX.Y.Z version comment (offline presence check)
+        entry: pinact run --no-api -fix=false
+        language: system
+        files: ^\.github/(workflows|actions)/.*\.ya?ml$
+        pass_filenames: true
+
+      - id: reexport-linter
+        name: reexport-linter
+        description: Check for re-exported symbols via __all__
+        entry: ./linters/reexport_linter.py --report-unused-directives .
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: ruff
         name: ruff
         description: Run ruff linter with auto-fix
@@ -28,34 +76,10 @@ repos:
         pass_filenames: false
         always_run: true
 
-      - id: mypy
-        name: mypy
-        description: Run mypy type checker
-        entry: uv run mypy .
-        language: system
-        pass_filenames: false
-        always_run: true
-
       - id: strict-typing-linter
         name: strict-typing-linter
         description: Check for mutable/loose types in annotations
         entry: ./linters/strict_typing_linter.py --report-unused-directives .
-        language: system
-        pass_filenames: false
-        always_run: true
-
-      - id: exception-safety-linter
-        name: exception-safety-linter
-        description: Check for exception handling anti-patterns
-        entry: ./linters/exception_safety_linter.py --report-unused-directives .
-        language: system
-        pass_filenames: false
-        always_run: true
-
-      - id: reexport-linter
-        name: reexport-linter
-        description: Check for re-exported symbols via __all__
-        entry: ./linters/reexport_linter.py --report-unused-directives .
         language: system
         pass_filenames: false
         always_run: true
@@ -72,6 +96,14 @@ repos:
         name: uv-script-linter
         description: Lint uv script shebangs and PEP 723 inline metadata
         entry: ./linters/uv_script_linter.py .
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: zizmor
+        name: zizmor
+        description: GitHub Actions static analysis (SHA-pin enforcement + workflow security)
+        entry: uv run zizmor .github/
         language: system
         pass_filenames: false
         always_run: true

@@ -12,6 +12,8 @@ from claude_session.schemas.types import ToolResultExtension
 from .agent_ids import (
     AGENT_FILENAME_PATTERN,
     AgentFileInfo,
+    AgentStructure,
+    agent_dest_path,
     apply_agent_id_mapping,
     collect_agent_file_info,
     detect_agent_structure,
@@ -19,15 +21,20 @@ from .agent_ids import (
     extract_base_agent_id,
     generate_agent_id_mapping,
     generate_clone_agent_id,
+    is_workflow_journal_path,
     transform_agent_filename,
 )
 from .agent_metadata import (
     AGENT_METADATA_FILENAME_PATTERN,
     SubagentsDirectoryContents,
+    agent_metadata_relpath,
     classify_subagents_directory,
     collect_agent_metadata,
+    collect_workflow_journals,
     transform_agent_metadata_filename,
+    transform_agent_metadata_relpath,
     write_agent_metadata,
+    write_workflow_journals,
 )
 from .custom_title import (
     CLONE_SUFFIX_PATTERN,
@@ -96,6 +103,12 @@ from .tool_results import (
     get_tool_results_dir,
     write_tool_results,
 )
+from .workflows import (
+    WORKFLOW_RUNS_DIRNAME,
+    collect_workflow_runs,
+    remap_workflow_run_json,
+    write_workflow_runs,
+)
 
 __all__ = [
     # debug_log
@@ -110,6 +123,8 @@ __all__ = [
     # agent_ids
     'AGENT_FILENAME_PATTERN',
     'AgentFileInfo',
+    'AgentStructure',
+    'agent_dest_path',
     'apply_agent_id_mapping',
     'collect_agent_file_info',
     'detect_agent_structure',
@@ -117,14 +132,19 @@ __all__ = [
     'extract_base_agent_id',
     'generate_agent_id_mapping',
     'generate_clone_agent_id',
+    'is_workflow_journal_path',
     'transform_agent_filename',
     # agent_metadata
     'AGENT_METADATA_FILENAME_PATTERN',
     'SubagentsDirectoryContents',
+    'agent_metadata_relpath',
     'classify_subagents_directory',
     'collect_agent_metadata',
+    'collect_workflow_journals',
     'transform_agent_metadata_filename',
+    'transform_agent_metadata_relpath',
     'write_agent_metadata',
+    'write_workflow_journals',
     # plan_files
     'SLUG_RECORD_TYPES',
     'extract_base_slug',
@@ -176,4 +196,9 @@ __all__ = [
     'SESSION_MEMORY_DIRNAME',
     'collect_session_memory',
     'write_session_memory',
+    # workflows
+    'WORKFLOW_RUNS_DIRNAME',
+    'collect_workflow_runs',
+    'remap_workflow_run_json',
+    'write_workflow_runs',
 ]

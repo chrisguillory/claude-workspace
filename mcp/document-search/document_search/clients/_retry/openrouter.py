@@ -8,22 +8,34 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
-import circuitbreaker
 import httpx
 import tenacity
 
+from document_search.clients._retry.breaker import LoggingCircuitBreaker
 from document_search.clients._retry.httpx_errors import is_retryable_httpx_error
+from document_search.clients._retry.remote import (
+    DEFAULT_STOP,
+    DEFAULT_WAIT,
+    RATE_LIMIT_STOP,
+    RATE_LIMIT_WAIT,
+    TransientClassifier,
+    category_aware_stop,
+    category_aware_wait,
+)
 from document_search.clients.openrouter_errors import (
     OpenRouterAPIError,
     OpenRouterEmptyResponse,
     OpenRouterTruncatedResponse,
 )
+from document_search.schemas.embeddings import TaskIntent
 
 __all__ = [
     'OpenRouterTransientErrorCategory',
     'is_retryable_openrouter_error',
     'log_openrouter_retry',
     'openrouter_breaker',
+    'openrouter_stop',
+    'openrouter_wait',
 ]
 
 logger = logging.getLogger(__name__)
@@ -73,6 +85,44 @@ def log_openrouter_retry(retry_state: tenacity.RetryCallState) -> None:
         exc_msg = f'HTTP {exc.response.status_code}: {exc_msg}'
 
     logger.warning('[RETRY] OpenRouter embed attempt %s failed: %s: %s', retry_state.attempt_number, exc_name, exc_msg)
+
+
+def openrouter_wait(retry_state: tenacity.RetryCallState) -> float:
+    """Category-aware backoff (deep+jittered for rate limits), capped to default for 'query'."""
+    return category_aware_wait(
+        retry_state,
+        classifier=_capped_classifier(retry_state),
+        rate_limit_wait=RATE_LIMIT_WAIT,
+        default_wait=DEFAULT_WAIT,
+    )
+
+
+def openrouter_stop(retry_state: tenacity.RetryCallState) -> bool:
+    """Deep attempts for a sustained rate limit, capped to default for interactive 'query'."""
+    return category_aware_stop(
+        retry_state,
+        classifier=_capped_classifier(retry_state),
+        rate_limit_stop=RATE_LIMIT_STOP,
+        default_stop=DEFAULT_STOP,
+    )
+
+
+def _capped_classifier(retry_state: tenacity.RetryCallState) -> TransientClassifier[OpenRouterTransientErrorCategory]:
+    """Intent caps category: 'query' demotes rate_limit so search fails fast instead of waiting ~15s.
+
+    intent is keyword-only on embed(), so it arrives as retry_state.kwargs['intent']
+    (mirrors how log_openrouter_retry reads retry_state.args[0]) — no signature change.
+    Indexing ('document') keeps the deep rate-limit window to ride out overload.
+    """
+    intent: TaskIntent = retry_state.kwargs['intent']
+    if intent != 'query':
+        return _classify_transient_error
+
+    def demote_rate_limit(exc: BaseException) -> OpenRouterTransientErrorCategory | None:
+        category = _classify_transient_error(exc)
+        return None if category == 'rate_limit' else category
+
+    return demote_rate_limit
 
 
 def _classify_transient_error(exc: BaseException) -> OpenRouterTransientErrorCategory | None:
@@ -150,7 +200,7 @@ def _openrouter_circuit_filter(thrown_type: type, thrown_value: BaseException) -
     return _classify_transient_error(thrown_value) is not None
 
 
-openrouter_breaker = circuitbreaker.CircuitBreaker(
+openrouter_breaker = LoggingCircuitBreaker(
     failure_threshold=OPENROUTER_FAILURE_THRESHOLD,
     recovery_timeout=OPENROUTER_RECOVERY_TIMEOUT,
     expected_exception=_openrouter_circuit_filter,

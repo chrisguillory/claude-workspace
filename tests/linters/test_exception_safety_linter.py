@@ -13,24 +13,15 @@ Validates two test files:
 
 from __future__ import annotations
 
-import ast
 import re
 from collections.abc import Mapping, Sequence, Set
 from pathlib import Path
-from typing import NamedTuple
 
 import pytest
 
-from tests.linters.helpers import run_linter
+from tests.linters.helpers import LineRange, get_class_ranges, get_def_ranges, run_linter
 
 # -- Data Types ---------------------------------------------------------------
-
-
-class LineRange(NamedTuple):
-    """Line range for a function definition (inclusive)."""
-
-    start: int
-    end: int
 
 
 # Maps function name to set of violation codes found/expected in that function
@@ -47,6 +38,29 @@ LINTER = CC_DIR / 'linters' / 'exception_safety_linter.py'
 EDGE_CASES_DIR = TEST_DIR / 'edge_cases'
 TEST_FILE = EDGE_CASES_DIR / 'exception_safety_test_cases.py'
 EDGE_CASE_FILE = EDGE_CASES_DIR / 'exception_safety_edge_cases.py'
+EXC010_PICKLE_TARGETS_FILE = EDGE_CASES_DIR / 'exc010_pickle_targets.py'
+
+# EXC010 fires on module-level Exception subclasses (the empirical check needs to
+# import them; nested-in-function classes are invisible to ``inspect.getmembers``).
+# Violations are mapped by class name, not function name — separate file + fixture.
+EXPECTED_EXC010: ViolationMap = {
+    'KwOnlyError_pickle_breaks': {'EXC010'},
+    'KwargsError_pickle_breaks': {'EXC010'},
+    'TransformedMessageError_pickle_breaks': {'EXC010'},
+    'ArgCountMismatchError_pickle_breaks': {'EXC010'},
+    'PassthroughError_pickle_ok': set(),
+    'MultiPassthroughError_pickle_ok': set(),
+    'ReduceEscapeHatchError_pickle_ok': set(),
+    'NoInitError_pickle_ok': set(),
+    'VarargPassthroughError_pickle_ok': set(),
+    'NoSuperCallError_pickle_ok': set(),
+    # Breaks pickle, but an inline directive suppresses the violation.
+    'InlineSuppressedError_pickle_breaks': set(),
+    # Mixin + synthesis coverage (generics, Literal, pickle-equivalence, ValidationError factory).
+    'MixinSeqLiteralError_pickle_ok': set(),
+    'WrappedCauseError_pickle_ok': set(),
+    'ValidationErrorParamError_pickle_ok': set(),
+}
 
 # -- Expected Violations: Instructive Test File -------------------------------
 
@@ -155,6 +169,12 @@ def edge_case_results() -> tuple[ViolationMap, Set[str]]:
     return _build_actual_map(EDGE_CASE_FILE)
 
 
+@pytest.fixture(scope='module')
+def exc010_results() -> tuple[ViolationMap, Set[str]]:
+    """Run linter on EXC010 pickle-targets file and return (actual_map, all_classes)."""
+    return _build_class_actual_map(EXC010_PICKLE_TARGETS_FILE)
+
+
 # -- Parametrized Tests: Instructive ------------------------------------------
 
 
@@ -231,26 +251,32 @@ def test_edge_case_no_unexpected(edge_case_results: tuple[ViolationMap, Set[str]
     assert not unexpected, '\n'.join(sorted(unexpected))
 
 
-# -- AST Parsing --------------------------------------------------------------
+# -- Parametrized Tests: EXC010 (class-based mapping) -------------------------
 
 
-def get_function_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
-    """Parse AST to get line ranges for each function.
+@pytest.mark.parametrize(
+    ('cls', 'expected_rules'),
+    EXPECTED_EXC010.items(),
+    ids=EXPECTED_EXC010.keys(),
+)
+def test_exc010_class(cls: str, expected_rules: set[str], exc010_results: tuple[ViolationMap, Set[str]]) -> None:
+    """Each EXC010 fixture class fires (or doesn't fire) the expected rules."""
+    actual_map, all_classes = exc010_results
+    assert cls in all_classes, f'{cls}: class not found in EXC010 fixture file'
+    actual_rules = actual_map.get(cls, set())
+    assert actual_rules == expected_rules, (
+        f'{cls}: expected {sorted(expected_rules)}, got {sorted(actual_rules) if actual_rules else "nothing"}'
+    )
 
-    Returns dict mapping function name to (start_line, end_line).
-    Fixture files must use unique function names — duplicates overwrite silently.
-    """
-    source = filepath.read_text(encoding='utf-8')
-    tree = ast.parse(source)
 
-    ranges: dict[str, LineRange] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            # end_lineno is always set for nodes parsed from source (not constructed)
-            assert node.end_lineno is not None
-            ranges[node.name] = LineRange(node.lineno, node.end_lineno)
-
-    return ranges
+def test_exc010_no_unexpected(exc010_results: tuple[ViolationMap, Set[str]]) -> None:
+    """No unexpected EXC010 violations on classes not in EXPECTED_EXC010."""
+    actual_map, _ = exc010_results
+    known = set(EXPECTED_EXC010.keys())
+    unexpected = {
+        f'{cls}: unexpected violations {sorted(rules)}' for cls, rules in actual_map.items() if cls not in known
+    }
+    assert not unexpected, '\n'.join(sorted(unexpected))
 
 
 # -- Linter Output Parsing ----------------------------------------------------
@@ -300,7 +326,21 @@ def _build_actual_map(test_file: Path) -> tuple[ViolationMap, Set[str]]:
 
     Returns (violation_map, all_function_names).
     """
-    ranges = get_function_line_ranges(test_file)
+    ranges = get_def_ranges(test_file)
+    output = run_linter(test_file, LINTER)
+    violations = parse_linter_output(output)
+    actual = map_violations_to_functions(violations, ranges)
+    return actual, set(ranges.keys())
+
+
+def _build_class_actual_map(test_file: Path) -> tuple[ViolationMap, Set[str]]:
+    """Run linter and build violation map keyed by class name.
+
+    Returns (violation_map, all_class_names). Used by EXC010 which fires on
+    module-level class definitions, so violations are mapped by class range
+    rather than function range.
+    """
+    ranges = get_class_ranges(test_file)
     output = run_linter(test_file, LINTER)
     violations = parse_linter_output(output)
     actual = map_violations_to_functions(violations, ranges)

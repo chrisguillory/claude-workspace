@@ -28,6 +28,8 @@ class ArtifactFile(StrictModel):
         'session_main',  # ~/.claude/projects/<enc>/{session_id}.jsonl
         'session_agent',  # Flat: .../agent-{id}.jsonl | Nested (2.1.2+): .../{sid}/subagents/agent-{id}.jsonl
         'agent_metadata',  # Nested only (2.1.70+): .../{sid}/subagents/agent-{id}.meta.json
+        'workflow_journal',  # .../{sid}/subagents/workflows/wf_<runId>/journal.jsonl
+        'workflow_run',  # .../{sid}/workflows/wf_<runId>.json + scripts/<name>-<runId>.js
         'plan_file',  # ~/.claude/plans/{slug}.md
         'tool_result',  # ~/.claude/projects/<enc>/{sid}/tool-results/{tool_use_id}.txt
         'todo_file',  # ~/.claude/todos/{session_id}-agent-{agent_id}.json

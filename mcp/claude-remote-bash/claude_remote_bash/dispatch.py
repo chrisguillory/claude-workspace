@@ -74,7 +74,7 @@ class DispatchService:
         *,
         session_id: str,
         agent_id: str | None,
-        timeout: float,
+        timeout: float | None,
     ) -> DispatchResult:
         """Parse the selector, fan out across hosts in parallel, return aggregated results."""
         cache = await self._hosts_resolver()
@@ -82,7 +82,7 @@ class DispatchService:
             atoms = parse_selector(
                 target,
                 groups=self._client_config.groups,
-                discovered_aliases=frozenset(entry.alias.lower() for entry in cache.all_hosts()),
+                discovered_aliases={entry.alias.lower() for entry in cache.all_hosts()},
             )
         except UnknownAtomError:
             # Cache may be fresh-by-TTL but stale-by-content — a daemon may have
@@ -92,7 +92,7 @@ class DispatchService:
                 atoms = parse_selector(
                     target,
                     groups=self._client_config.groups,
-                    discovered_aliases=frozenset(entry.alias.lower() for entry in cache.all_hosts()),
+                    discovered_aliases={entry.alias.lower() for entry in cache.all_hosts()},
                 )
             except SelectorError as exc:
                 raise RemoteBashError(str(exc)) from exc
@@ -138,7 +138,7 @@ async def _run_one(
     *,
     session_id: str,
     agent_id: str | None,
-    timeout: float,
+    timeout: float | None,
 ) -> HostRunResult:
     """Run on one host; capture wire-level failures into ``HostRunResult.error`` instead of aborting the batch."""
     started = time.monotonic()

@@ -18,7 +18,7 @@ validation straightforward and errors easy to diagnose.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -266,6 +266,51 @@ class RegularClassHashableViolation:
     __strict_typing_linter__hashable_fields__ = True
 
     items: Sequence[int]  # hashable-field: Sequence not hashable
+
+
+# -- frozenset-constant: frozenset in module/class constants ------------------
+
+
+class FrozensetConstantAnnotation:
+    """VIOLATION: frozenset[T] annotation should be collections.abc.Set[T] = {...}."""
+
+    VALUES: frozenset[str] = frozenset({'a', 'b'})  # frozenset-constant
+
+
+class FrozensetConstantBareValue:
+    """VIOLATION: a bare ``= frozenset(...)`` constant (no annotation)."""
+
+    VALUES = frozenset({'a', 'b'})  # frozenset-constant: value-level
+
+
+class FrozensetConstantClassVar:
+    """VIOLATION: frozenset inside ClassVar is still a frozenset constant."""
+
+    VALUES: ClassVar[frozenset[str]] = frozenset({'a'})  # frozenset-constant
+
+
+class FrozensetConstantUnion:
+    """VIOLATION: frozenset in a union is flagged (annotation pass recurses)."""
+
+    VALUES: frozenset[str] | None = None  # frozenset-constant
+
+
+class FrozensetConstantHalfMigrated:
+    """VIOLATION: abstract Set annotation but the value is still frozenset(...)."""
+
+    VALUES: Set[str] = frozenset({'a'})  # frozenset-constant: value-level
+
+
+class FrozensetCorrectDictKey:
+    """CORRECT: frozenset as a Mapping key is hashability-required — not flagged."""
+
+    MAPPING: Mapping[frozenset[str], int]
+
+
+class FrozensetSuppressed:
+    """SUPPRESSED: frozenset kept deliberately (e.g. used as a dict key elsewhere)."""
+
+    VALUES: frozenset[str] = frozenset({'a'})  # strict_typing_linter.py: frozenset-constant
 
 
 # -- Stub Functions (for class method signatures) -----------------------------

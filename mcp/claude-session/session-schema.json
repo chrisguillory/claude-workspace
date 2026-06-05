@@ -1,5 +1,81 @@
 {
   "$defs": {
+    "AgentColorRecord": {
+      "additionalProperties": false,
+      "description": "Palette color assigned to a worker-agent session.\n\nBinary ``JzH(sessionFile,{type:\"agent-color\",agentColor,sessionId})``; written only\nwhen the color is truthy (``\"default\"`` is skipped).",
+      "properties": {
+        "type": {
+          "const": "agent-color",
+          "title": "Type",
+          "type": "string"
+        },
+        "agentColor": {
+          "title": "Agentcolor",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "agentColor",
+        "sessionId"
+      ],
+      "title": "AgentColorRecord",
+      "type": "object"
+    },
+    "AgentListingDeltaAttachment": {
+      "additionalProperties": false,
+      "description": "Agent registry changes \u2014 added/removed agent types for the Agent tool (Claude Code 2.1.90+).",
+      "properties": {
+        "type": {
+          "const": "agent_listing_delta",
+          "title": "Type",
+          "type": "string"
+        },
+        "addedTypes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Addedtypes",
+          "type": "array"
+        },
+        "addedLines": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Addedlines",
+          "type": "array"
+        },
+        "removedTypes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Removedtypes",
+          "type": "array"
+        },
+        "isInitial": {
+          "title": "Isinitial",
+          "type": "boolean"
+        },
+        "showConcurrencyNote": {
+          "title": "Showconcurrencynote",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "addedTypes",
+        "addedLines",
+        "removedTypes",
+        "isInitial",
+        "showConcurrencyNote"
+      ],
+      "title": "AgentListingDeltaAttachment",
+      "type": "object"
+    },
     "AgentNameRecord": {
       "additionalProperties": false,
       "description": "Records the human-readable name assigned to a worker agent session.\n\nWritten to main session files to associate agent sessions with descriptive names.",
@@ -125,6 +201,32 @@
       "title": "AgentProgressData",
       "type": "object"
     },
+    "AgentSettingRecord": {
+      "additionalProperties": false,
+      "description": "Agent-type setting for a session.\n\nBinary metadata-reemit ``$.push({type:\"agent-setting\",agentSetting,sessionId})``;\n``agentSetting`` is the agentType identifier string (e.g. ``\"custom\"``), not an object.",
+      "properties": {
+        "type": {
+          "const": "agent-setting",
+          "title": "Type",
+          "type": "string"
+        },
+        "agentSetting": {
+          "title": "Agentsetting",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "agentSetting",
+        "sessionId"
+      ],
+      "title": "AgentSettingRecord",
+      "type": "object"
+    },
     "AgentState": {
       "additionalProperties": false,
       "description": "State of a background agent (may be running or completed).",
@@ -248,6 +350,131 @@
       "title": "AgentTeammateSpawnedResult",
       "type": "object"
     },
+    "AgentsKilledSystemRecord": {
+      "additionalProperties": false,
+      "description": "System record emitted when running subagents are killed (subtype=agents_killed, Claude Code 2.1.139+).\n\nCarries no payload beyond the base envelope; signals subagent termination\n(e.g., on Esc / session interrupt).",
+      "properties": {
+        "type": {
+          "const": "system",
+          "title": "Type",
+          "type": "string"
+        },
+        "uuid": {
+          "title": "Uuid",
+          "type": "string"
+        },
+        "timestamp": {
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
+        "cwd": {
+          "$ref": "#/$defs/PathField"
+        },
+        "parentUuid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parentuuid"
+        },
+        "subtype": {
+          "const": "agents_killed",
+          "title": "Subtype",
+          "type": "string"
+        },
+        "isMeta": {
+          "title": "Ismeta",
+          "type": "boolean"
+        },
+        "isSidechain": {
+          "title": "Issidechain",
+          "type": "boolean"
+        },
+        "userType": {
+          "title": "Usertype",
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/CCVersionStrField"
+        },
+        "gitBranch": {
+          "title": "Gitbranch",
+          "type": "string"
+        },
+        "slug": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Slug"
+        },
+        "entrypoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entrypoint"
+        }
+      },
+      "required": [
+        "type",
+        "uuid",
+        "timestamp",
+        "sessionId",
+        "cwd",
+        "parentUuid",
+        "subtype",
+        "isMeta",
+        "isSidechain",
+        "userType",
+        "version",
+        "gitBranch"
+      ],
+      "title": "AgentsKilledSystemRecord",
+      "type": "object"
+    },
     "AgentsRetrievalResult": {
       "additionalProperties": false,
       "description": "Result from retrieving multiple agent states.",
@@ -274,6 +501,61 @@
         "agents"
       ],
       "title": "AgentsRetrievalResult",
+      "type": "object"
+    },
+    "AiTitleRecord": {
+      "additionalProperties": false,
+      "description": "AI-generated session title shown in the `/resume` UI.",
+      "properties": {
+        "type": {
+          "const": "ai-title",
+          "title": "Type",
+          "type": "string"
+        },
+        "aiTitle": {
+          "title": "Aititle",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "aiTitle",
+        "sessionId"
+      ],
+      "title": "AiTitleRecord",
+      "type": "object"
+    },
+    "AlreadyReadFileAttachment": {
+      "additionalProperties": false,
+      "description": "Reminder injected when Claude re-Reads an unchanged file in the same session.\n\nCarries the cached snapshot the model has already seen so it can skip re-issuing\nthe Read tool. Shape mirrors FileAttachment exactly (filename + displayPath +\nwrapped FileAttachmentContent), so the nested types are reused directly.",
+      "properties": {
+        "type": {
+          "const": "already_read_file",
+          "title": "Type",
+          "type": "string"
+        },
+        "filename": {
+          "$ref": "#/$defs/PathField"
+        },
+        "content": {
+          "$ref": "#/$defs/FileAttachmentContent"
+        },
+        "displayPath": {
+          "title": "Displaypath",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "filename",
+        "content",
+        "displayPath"
+      ],
+      "title": "AlreadyReadFileAttachment",
       "type": "object"
     },
     "ApiError": {
@@ -327,7 +609,10 @@
         "type": {
           "anyOf": [
             {
-              "const": "overloaded_error",
+              "enum": [
+                "overloaded_error",
+                "rate_limit_error"
+              ],
               "type": "string"
             },
             {
@@ -350,7 +635,10 @@
       "description": "Nested API error details.",
       "properties": {
         "type": {
-          "const": "overloaded_error",
+          "enum": [
+            "overloaded_error",
+            "rate_limit_error"
+          ],
           "title": "Type",
           "type": "string"
         },
@@ -419,6 +707,30 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -481,14 +793,13 @@
         "version": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/CCVersionStrField"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Version"
+          "default": null
         },
         "gitBranch": {
           "anyOf": [
@@ -581,6 +892,12 @@
             },
             {
               "$ref": "#/$defs/NetworkError"
+            },
+            {
+              "$ref": "#/$defs/NetworkDownError"
+            },
+            {
+              "$ref": "#/$defs/RetryableHttpError"
             },
             {
               "$ref": "#/$defs/EmptyError"
@@ -712,6 +1029,30 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -759,6 +1100,7 @@
                 "claude-opus-4-5-20251101",
                 "claude-opus-4-6",
                 "claude-opus-4-7",
+                "claude-opus-4-8",
                 "claude-sonnet-4-6",
                 "claude-sonnet-4-5-20250929",
                 "haiku",
@@ -843,15 +1185,14 @@
         "version": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/CCVersionStrField"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "description": "Claude Code version (present in agent records)",
-          "title": "Version"
+          "description": "Claude Code version (present in agent records)"
         },
         "gitBranch": {
           "anyOf": [
@@ -990,6 +1331,71 @@
           "default": null,
           "description": "HTTP status code for API errors (e.g., 400, 529) (Claude Code 2.1.100+)",
           "title": "Apierrorstatus"
+        },
+        "attributionAgent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Agent type attribution for assistant records emitted under a specific agent (Claude Code 2.1.121+); references the running agent name (e.g., \"unrestricted-worker\"). Typed str (not Literal) since values come from the user agent registry, matching the agentName/teamName precedent.",
+          "title": "Attributionagent"
+        },
+        "attributionSkill": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Active skill name (e.g., \"recover-session\"); mirrors attributionAgent.",
+          "title": "Attributionskill"
+        },
+        "attributionPlugin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Active plugin name (e.g., \"codex\"); paired with attributionSkill when the assistant turn is emitted by a plugin-installed skill (Claude Code 2.1.121+).",
+          "title": "Attributionplugin"
+        },
+        "attributionMcpServer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "MCP server name attributed to an assistant turn that invoked an MCP tool (e.g., \"selenium-browser\"); paired with attributionMcpTool (Claude Code 2.1.149+).",
+          "title": "Attributionmcpserver"
+        },
+        "attributionMcpTool": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "MCP tool name attributed to the turn (e.g., \"navigate\"); paired with attributionMcpServer (Claude Code 2.1.149+).",
+          "title": "Attributionmcptool"
         }
       },
       "required": [
@@ -1086,6 +1492,30 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -1110,8 +1540,7 @@
           "type": "string"
         },
         "version": {
-          "title": "Version",
-          "type": "string"
+          "$ref": "#/$defs/CCVersionStrField"
         },
         "gitBranch": {
           "title": "Gitbranch",
@@ -1153,21 +1582,49 @@
           "default": null,
           "title": "Agentid"
         },
+        "teamName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Teamname"
+        },
+        "agentName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agentname"
+        },
         "attachment": {
           "discriminator": {
             "mapping": {
+              "agent_listing_delta": "#/$defs/AgentListingDeltaAttachment",
+              "already_read_file": "#/$defs/AlreadyReadFileAttachment",
               "auto_mode": "#/$defs/AutoModeAttachment",
               "auto_mode_exit": "#/$defs/AutoModeExitAttachment",
               "command_permissions": "#/$defs/CommandPermissionsAttachment",
               "compact_file_reference": "#/$defs/CompactFileReferenceAttachment",
               "companion_intro": "#/$defs/CompanionIntroAttachment",
               "date_change": "#/$defs/DateChangeAttachment",
+              "deferred_tools_delta": "#/$defs/DeferredToolsDeltaAttachment",
               "diagnostics": "#/$defs/DiagnosticsAttachment",
               "dynamic_skill": "#/$defs/DynamicSkillAttachment",
               "edited_text_file": "#/$defs/EditedTextFileAttachment",
               "file": "#/$defs/FileAttachment",
               "hook_additional_context": "#/$defs/HookAdditionalContextAttachment",
               "hook_blocking_error": "#/$defs/HookBlockingErrorAttachment",
+              "hook_cancelled": "#/$defs/HookCancelledAttachment",
               "hook_non_blocking_error": "#/$defs/HookNonBlockingErrorAttachment",
               "hook_success": "#/$defs/HookSuccessAttachment",
               "invoked_skills": "#/$defs/InvokedSkillsAttachment",
@@ -1181,7 +1638,10 @@
               "queued_command": "#/$defs/QueuedCommandAttachment",
               "selected_lines_in_ide": "#/$defs/SelectedLinesInIdeAttachment",
               "skill_listing": "#/$defs/SkillListingAttachment",
-              "task_reminder": "#/$defs/TaskReminderAttachment"
+              "task_reminder": "#/$defs/TaskReminderAttachment",
+              "task_status": "#/$defs/TaskStatusAttachment",
+              "ultrathink_effort": "#/$defs/UltrathinkEffortAttachment",
+              "workflow_keyword_request": "#/$defs/WorkflowKeywordRequestAttachment"
             },
             "propertyName": "type"
           },
@@ -1191,6 +1651,12 @@
             },
             {
               "$ref": "#/$defs/McpInstructionsDeltaAttachment"
+            },
+            {
+              "$ref": "#/$defs/DeferredToolsDeltaAttachment"
+            },
+            {
+              "$ref": "#/$defs/AgentListingDeltaAttachment"
             },
             {
               "$ref": "#/$defs/TaskReminderAttachment"
@@ -1203,6 +1669,9 @@
             },
             {
               "$ref": "#/$defs/HookNonBlockingErrorAttachment"
+            },
+            {
+              "$ref": "#/$defs/HookCancelledAttachment"
             },
             {
               "$ref": "#/$defs/HookAdditionalContextAttachment"
@@ -1224,6 +1693,9 @@
             },
             {
               "$ref": "#/$defs/FileAttachment"
+            },
+            {
+              "$ref": "#/$defs/AlreadyReadFileAttachment"
             },
             {
               "$ref": "#/$defs/EditedTextFileAttachment"
@@ -1263,6 +1735,15 @@
             },
             {
               "$ref": "#/$defs/AutoModeExitAttachment"
+            },
+            {
+              "$ref": "#/$defs/WorkflowKeywordRequestAttachment"
+            },
+            {
+              "$ref": "#/$defs/UltrathinkEffortAttachment"
+            },
+            {
+              "$ref": "#/$defs/TaskStatusAttachment"
             }
           ],
           "title": "Attachment"
@@ -1342,6 +1823,30 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -1378,8 +1883,7 @@
           "type": "string"
         },
         "version": {
-          "title": "Version",
-          "type": "string"
+          "$ref": "#/$defs/CCVersionStrField"
         },
         "gitBranch": {
           "title": "Gitbranch",
@@ -1540,6 +2044,30 @@
         "sessionId": {
           "title": "Sessionid",
           "type": "string"
+        },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         }
       },
       "required": [
@@ -2082,6 +2610,37 @@
       "title": "BashToolResult",
       "type": "object"
     },
+    "BridgeSessionRecord": {
+      "additionalProperties": false,
+      "description": "Records the remote-control bridge association for a session.\n\nResumption-state sidecar (no uuid/timestamp), written alongside\nPermissionModeRecord. Binary: ``$.push({type:\"bridge-session\",sessionId:q,\nbridgeSessionId:...,lastSequenceNum:...})``; emitted by /remote-control\nbridge sessions. Distinct from BridgeStatusSystemRecord (a system subtype).",
+      "properties": {
+        "type": {
+          "const": "bridge-session",
+          "title": "Type",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        },
+        "bridgeSessionId": {
+          "title": "Bridgesessionid",
+          "type": "string"
+        },
+        "lastSequenceNum": {
+          "title": "Lastsequencenum",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "sessionId",
+        "bridgeSessionId",
+        "lastSequenceNum"
+      ],
+      "title": "BridgeSessionRecord",
+      "type": "object"
+    },
     "BridgeStatusSystemRecord": {
       "additionalProperties": false,
       "description": "System record for remote-control bridge status (subtype=bridge_status, Claude Code 2.1.51+).",
@@ -2102,6 +2661,30 @@
         "sessionId": {
           "title": "Sessionid",
           "type": "string"
+        },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -2155,8 +2738,7 @@
           "type": "string"
         },
         "version": {
-          "title": "Version",
-          "type": "string"
+          "$ref": "#/$defs/CCVersionStrField"
         },
         "gitBranch": {
           "title": "Gitbranch",
@@ -2242,6 +2824,9 @@
       "title": "BridgeStatusSystemRecord",
       "type": "object"
     },
+    "CCVersionStrField": {
+      "type": "string"
+    },
     "CacheCreation": {
       "additionalProperties": false,
       "description": "Cache creation token breakdown.",
@@ -2260,6 +2845,143 @@
         "ephemeral_1h_input_tokens"
       ],
       "title": "CacheCreation",
+      "type": "object"
+    },
+    "CacheMissReasonMessagesChanged": {
+      "additionalProperties": false,
+      "description": "Cache miss because messages earlier in the conversation changed.\n\nCarries the count of input tokens that were not served from cache.",
+      "properties": {
+        "type": {
+          "const": "messages_changed",
+          "title": "Type",
+          "type": "string"
+        },
+        "cache_missed_input_tokens": {
+          "title": "Cache Missed Input Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "cache_missed_input_tokens"
+      ],
+      "title": "CacheMissReasonMessagesChanged",
+      "type": "object"
+    },
+    "CacheMissReasonModelChanged": {
+      "additionalProperties": false,
+      "description": "Cache miss because the model changed mid-session.\n\nCarries the count of input tokens that were not served from cache.\nServer-emitted via the cache-diagnosis-2026-04-07 Anthropic API beta\nheader, not present in the client binary (consistent with the other\nCacheMissReason variants).",
+      "properties": {
+        "type": {
+          "const": "model_changed",
+          "title": "Type",
+          "type": "string"
+        },
+        "cache_missed_input_tokens": {
+          "title": "Cache Missed Input Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "cache_missed_input_tokens"
+      ],
+      "title": "CacheMissReasonModelChanged",
+      "type": "object"
+    },
+    "CacheMissReasonParamsChanged": {
+      "additionalProperties": false,
+      "description": "Cache miss because request parameters changed.\n\nCarries the count of input tokens that were not served from cache.",
+      "properties": {
+        "type": {
+          "const": "params_changed",
+          "title": "Type",
+          "type": "string"
+        },
+        "cache_missed_input_tokens": {
+          "title": "Cache Missed Input Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "cache_missed_input_tokens"
+      ],
+      "title": "CacheMissReasonParamsChanged",
+      "type": "object"
+    },
+    "CacheMissReasonPreviousMessageNotFound": {
+      "additionalProperties": false,
+      "description": "Cache miss because the previous message couldn't be located in the cache.",
+      "properties": {
+        "type": {
+          "const": "previous_message_not_found",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "CacheMissReasonPreviousMessageNotFound",
+      "type": "object"
+    },
+    "CacheMissReasonSystemChanged": {
+      "additionalProperties": false,
+      "description": "Cache miss because the system prompt changed.\n\nCarries the count of input tokens that were not served from cache.",
+      "properties": {
+        "type": {
+          "const": "system_changed",
+          "title": "Type",
+          "type": "string"
+        },
+        "cache_missed_input_tokens": {
+          "title": "Cache Missed Input Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "cache_missed_input_tokens"
+      ],
+      "title": "CacheMissReasonSystemChanged",
+      "type": "object"
+    },
+    "CacheMissReasonToolsChanged": {
+      "additionalProperties": false,
+      "description": "Cache miss because tool definitions changed.\n\nCarries the count of input tokens that were not served from cache.",
+      "properties": {
+        "type": {
+          "const": "tools_changed",
+          "title": "Type",
+          "type": "string"
+        },
+        "cache_missed_input_tokens": {
+          "title": "Cache Missed Input Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "cache_missed_input_tokens"
+      ],
+      "title": "CacheMissReasonToolsChanged",
+      "type": "object"
+    },
+    "CacheMissReasonUnavailable": {
+      "additionalProperties": false,
+      "description": "Cache miss because cache lookup was unavailable for this request.",
+      "properties": {
+        "type": {
+          "const": "unavailable",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "CacheMissReasonUnavailable",
       "type": "object"
     },
     "ClearThinkingEdit": {
@@ -2333,6 +3055,30 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -2387,8 +3133,7 @@
           "type": "string"
         },
         "version": {
-          "title": "Version",
-          "type": "string"
+          "$ref": "#/$defs/CCVersionStrField"
         },
         "gitBranch": {
           "title": "Gitbranch",
@@ -2576,6 +3321,28 @@
           ],
           "default": null,
           "title": "Durationms"
+        },
+        "preservedSegment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreservedCompactSegment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "preservedMessages": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreservedCompactMessages"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -2639,6 +3406,97 @@
         "errno"
       ],
       "title": "ConnectionError",
+      "type": "object"
+    },
+    "ContentReplacement": {
+      "additionalProperties": false,
+      "description": "A single tool-result replacement within a ContentReplacementRecord.",
+      "properties": {
+        "kind": {
+          "const": "tool-result",
+          "title": "Kind",
+          "type": "string"
+        },
+        "toolUseId": {
+          "title": "Tooluseid",
+          "type": "string"
+        },
+        "replacement": {
+          "title": "Replacement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "toolUseId",
+        "replacement"
+      ],
+      "title": "ContentReplacement",
+      "type": "object"
+    },
+    "ContentReplacementRecord": {
+      "additionalProperties": false,
+      "description": "Replaces persisted tool-result content (compaction/fork dedup).\n\nBinary has three write sites: bulk ``{type,sessionId,replacements}``; fork/clone adds\n``uuid``+``timestamp``; per-agent (route-by-agent) adds ``agentId``. Each replacement\nswaps a tool_use's stored output for a compacted form.",
+      "properties": {
+        "type": {
+          "const": "content-replacement",
+          "title": "Type",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        },
+        "replacements": {
+          "items": {
+            "$ref": "#/$defs/ContentReplacement"
+          },
+          "title": "Replacements",
+          "type": "array"
+        },
+        "agentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agentid"
+        },
+        "uuid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uuid"
+        },
+        "timestamp": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp"
+        }
+      },
+      "required": [
+        "type",
+        "sessionId",
+        "replacements"
+      ],
+      "title": "ContentReplacementRecord",
       "type": "object"
     },
     "ContextManagement": {
@@ -2800,6 +3658,76 @@
         "newDate"
       ],
       "title": "DateChangeAttachment",
+      "type": "object"
+    },
+    "DeferredToolsDeltaAttachment": {
+      "additionalProperties": false,
+      "description": "Deferred-tool registration changes for the tool-search system (Claude Code 2.1.120+).",
+      "properties": {
+        "type": {
+          "const": "deferred_tools_delta",
+          "title": "Type",
+          "type": "string"
+        },
+        "addedNames": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Addednames",
+          "type": "array"
+        },
+        "addedLines": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Addedlines",
+          "type": "array"
+        },
+        "removedNames": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Removednames",
+          "type": "array"
+        },
+        "readdedNames": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Readdednames"
+        },
+        "pendingMcpServers": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pendingmcpservers"
+        }
+      },
+      "required": [
+        "type",
+        "addedNames",
+        "addedLines",
+        "removedNames"
+      ],
+      "title": "DeferredToolsDeltaAttachment",
       "type": "object"
     },
     "DiagnosticFile": {
@@ -3098,7 +4026,7 @@
     },
     "EditedTextFileAttachment": {
       "additionalProperties": false,
-      "description": "File edited externally \u2014 snippet with line numbers shown to Claude.",
+      "description": "File edited externally \u2014 snippet with line numbers shown to Claude.\n\ndisplayPath is rare (~2% of observed records, only on more recent\nClaude Code versions when the file is outside cwd); modeled optional.",
       "properties": {
         "type": {
           "const": "edited_text_file",
@@ -3111,6 +4039,18 @@
         "snippet": {
           "title": "Snippet",
           "type": "string"
+        },
+        "displayPath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Displaypath"
         }
       },
       "required": [
@@ -3123,8 +4063,14 @@
     },
     "EmptyError": {
       "additionalProperties": false,
-      "description": "Empty error object for unknown/unspecified API errors (Claude Code 2.0.76+).",
-      "properties": {},
+      "description": "Unspecified API error object (Claude Code 2.0.76+).\n\nEmitted either fields-less (``{}``) or as a bare ``{\"type\": null}`` -- a\nnetwork-error object whose ``cause`` was undefined at write time. The\noptional null ``type`` mirrors ``NetworkError.type`` / ``ApiError.type``.",
+      "properties": {
+        "type": {
+          "default": null,
+          "title": "Type",
+          "type": "null"
+        }
+      },
       "title": "EmptyError",
       "type": "object"
     },
@@ -3628,6 +4574,62 @@
         "totalLines"
       ],
       "title": "FileInfo",
+      "type": "object"
+    },
+    "ForkContextRefRecord": {
+      "additionalProperties": false,
+      "description": "Subagent fork-context pointer linking a forked subagent journal to its parent.\n\nBinary ``appendEntry({type:\"fork-context-ref\",agentId,parentSessionId,parentLastUuid,\ncontextLength})`` (route-by-agent -> ``subagents/agent-*.jsonl``). Minimal pointer:\nno uuid/timestamp/sessionId/cwd envelope -- ``parentSessionId``/``parentLastUuid``\nreference the parent instead.",
+      "properties": {
+        "type": {
+          "const": "fork-context-ref",
+          "title": "Type",
+          "type": "string"
+        },
+        "agentId": {
+          "title": "Agentid",
+          "type": "string"
+        },
+        "parentSessionId": {
+          "title": "Parentsessionid",
+          "type": "string"
+        },
+        "parentLastUuid": {
+          "title": "Parentlastuuid",
+          "type": "string"
+        },
+        "contextLength": {
+          "title": "Contextlength",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "agentId",
+        "parentSessionId",
+        "parentLastUuid",
+        "contextLength"
+      ],
+      "title": "ForkContextRefRecord",
+      "type": "object"
+    },
+    "ForkOrigin": {
+      "additionalProperties": false,
+      "description": "Backpointer to the source session/message a forked session branched from.",
+      "properties": {
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        },
+        "messageUuid": {
+          "title": "Messageuuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "messageUuid"
+      ],
+      "title": "ForkOrigin",
       "type": "object"
     },
     "GlobToolInput": {
@@ -4206,6 +5208,47 @@
       "title": "HookBlockingErrorData",
       "type": "object"
     },
+    "HookCancelledAttachment": {
+      "additionalProperties": false,
+      "description": "Hook execution was cancelled (e.g., aborted before completion).",
+      "properties": {
+        "type": {
+          "const": "hook_cancelled",
+          "title": "Type",
+          "type": "string"
+        },
+        "hookName": {
+          "title": "Hookname",
+          "type": "string"
+        },
+        "toolUseID": {
+          "title": "Tooluseid",
+          "type": "string"
+        },
+        "hookEvent": {
+          "title": "Hookevent",
+          "type": "string"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "durationMs": {
+          "title": "Durationms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "hookName",
+        "toolUseID",
+        "hookEvent",
+        "command",
+        "durationMs"
+      ],
+      "title": "HookCancelledAttachment",
+      "type": "object"
+    },
     "HookInfo": {
       "additionalProperties": false,
       "description": "Information about a hook execution.",
@@ -4213,6 +5256,18 @@
         "command": {
           "title": "Command",
           "type": "string"
+        },
+        "durationMs": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Durationms"
         }
       },
       "required": [
@@ -4466,7 +5521,9 @@
         "media_type": {
           "enum": [
             "image/jpeg",
-            "image/png"
+            "image/png",
+            "image/gif",
+            "image/webp"
           ],
           "title": "Media Type",
           "type": "string"
@@ -4504,6 +5561,30 @@
         "sessionId": {
           "title": "Sessionid",
           "type": "string"
+        },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -4593,14 +5674,13 @@
         "version": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/CCVersionStrField"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Version"
+          "default": null
         },
         "gitBranch": {
           "anyOf": [
@@ -4736,6 +5816,37 @@
       "title": "InvokedSkillsAttachment",
       "type": "object"
     },
+    "IsolationLatchRecord": {
+      "additionalProperties": false,
+      "description": "Coordinator/worker isolation side for a session.\n\nBinary ``Y$4(sessionFile,{type:\"isolation-latch\",side,sessionId})`` where\n``side = isCoordinatorMode() ? \"coordinator\" : \"normal\"`` (same projection as\nSessionModeRecord.mode).",
+      "properties": {
+        "type": {
+          "const": "isolation-latch",
+          "title": "Type",
+          "type": "string"
+        },
+        "side": {
+          "enum": [
+            "coordinator",
+            "normal"
+          ],
+          "title": "Side",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "side",
+        "sessionId"
+      ],
+      "title": "IsolationLatchRecord",
+      "type": "object"
+    },
+    "JsonValue": {},
     "KillShellMessageResult": {
       "additionalProperties": false,
       "description": "Alternative KillShell result with message format (snake_case shell_id).",
@@ -4867,7 +5978,7 @@
     },
     "LastPromptRecord": {
       "additionalProperties": false,
-      "description": "Records the user's last prompt text, always the final record in a session file.",
+      "description": "Records the user's last prompt text.\n\nTypically the final record in a session file. Claude Code 2.1.120+ also writes a\nplaceholder near session start with `lastPrompt` absent until the first user input.\nClaude Code 2.1.121+ adds `leafUuid` referencing the latest message UUID in this\nconversation branch (parallels SummaryRecord.leafUuid).",
       "properties": {
         "type": {
           "const": "last-prompt",
@@ -4875,17 +5986,36 @@
           "type": "string"
         },
         "lastPrompt": {
-          "title": "Lastprompt",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lastprompt"
         },
         "sessionId": {
           "title": "Sessionid",
           "type": "string"
+        },
+        "leafUuid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Leafuuid"
         }
       },
       "required": [
         "type",
-        "lastPrompt",
         "sessionId"
       ],
       "title": "LastPromptRecord",
@@ -4931,6 +6061,30 @@
         "sessionId": {
           "title": "Sessionid",
           "type": "string"
+        },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -4986,8 +6140,7 @@
           "type": "string"
         },
         "version": {
-          "title": "Version",
-          "type": "string"
+          "$ref": "#/$defs/CCVersionStrField"
         },
         "gitBranch": {
           "title": "Gitbranch",
@@ -5122,30 +6275,6 @@
       "description": "Permissive model for MCP (Model Context Protocol) tool results.\n\nMCP tools are third-party integrations with varying result schemas. We\nintentionally do not model their specific fields because:\n1. There are 64+ different MCP tools with different result structures\n2. They are user-configured and can change without Claude Code updates\n3. Their schemas are defined by external MCP servers\n\nNOTE: Unlike MCPToolInput, we cannot validate that only MCP tools use this\nfallback. Tool results don't carry the tool name (it's in the previous\nassistant message's ToolUseContent). Observability is provided by\nfind_fallbacks() in validate_models.py instead.\n\nUses PermissiveModel to accept any fields while maintaining type observability.",
       "properties": {},
       "title": "MCPToolResult",
-      "type": "object"
-    },
-    "MalformedWriteToolInput": {
-      "additionalProperties": false,
-      "description": "Malformed Write tool input from historical JSON serialization bug.\n\nCONTEXT:\nThis model exists to handle exactly 2 session records from December 24, 2025\n(Claude Code version 2.0.76) where a JSON serialization bug caused malformed\ntool_use inputs to be recorded in session files.\n\nWHAT HAPPENED:\nThe model was writing a markdown file documenting Claude-in-Chrome MCP tool\ninvocation patterns. The markdown content contained example XML showing how\nto invoke tools, including syntax like:\n\n    <parameter name=\"param1\">value1\",\"param2\":\"value2\"}}]\n\nSomething in the serialization chain incorrectly parsed this content. The\n`param2` substring within the content string was extracted as an actual\ntool parameter, producing a malformed tool_use input like:\n\n    {\"file_path\": \"...\", \"content\": \"...<truncated>...\", \"param2\": \"value2\"}}]...\"}\n\nOUTCOME:\nClaude Code's input validation correctly rejected these tool calls with:\n    InputValidationError: An unexpected parameter `param2` was provided\n\nThe writes never executed - the session files contain records of rejected\nattempts, not successful operations.\n\nWHY WE MODEL THIS:\nOur Pydantic models validate session records (what was attempted), not tool\nexecution success. The malformed tool_use attempts exist in the session files\nand need a matching model to pass validation.\n\nEVIDENCE:\nSee fixtures/edge_cases/malformed_write_param2.jsonl for sanitized reproduction\nrecords. This fixture contains the actual malformed records (paths sanitized)\nand is validated by tests/test_fixtures.py.\n\nFUTURE:\nIf Anthropic fixes the serialization bug and cleans up historical session\nfiles, this model can be removed. The bug appears fixed in later versions\n(no occurrences after December 2025).",
-      "properties": {
-        "file_path": {
-          "$ref": "#/$defs/PathField"
-        },
-        "content": {
-          "title": "Content",
-          "type": "string"
-        },
-        "param2": {
-          "title": "Param2",
-          "type": "string"
-        }
-      },
-      "required": [
-        "file_path",
-        "content",
-        "param2"
-      ],
-      "title": "MalformedWriteToolInput",
       "type": "object"
     },
     "McpInstructionsDeltaAttachment": {
@@ -5495,6 +6624,7 @@
                 "claude-opus-4-5-20251101",
                 "claude-opus-4-6",
                 "claude-opus-4-7",
+                "claude-opus-4-8",
                 "claude-sonnet-4-6",
                 "claude-sonnet-4-5-20250929",
                 "haiku",
@@ -5594,6 +6724,18 @@
           ],
           "default": null,
           "description": "Context management metadata (Claude Code 2.0.51+)"
+        },
+        "diagnostics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MessageDiagnostics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Cache-miss diagnostics (Claude Code 2.1.119+); null when cache hit or unavailable"
         }
       },
       "required": [
@@ -5601,6 +6743,55 @@
         "content"
       ],
       "title": "Message",
+      "type": "object"
+    },
+    "MessageDiagnostics": {
+      "additionalProperties": false,
+      "description": "Diagnostic metadata about request handling (Claude Code 2.1.119+).\n\nEmitted via the `cache-diagnosis-2026-04-07` Anthropic API beta header.\nCurrently always reports prompt-cache outcome. May expand to other\ndiagnostic categories in future versions.",
+      "properties": {
+        "cache_miss_reason": {
+          "discriminator": {
+            "mapping": {
+              "messages_changed": "#/$defs/CacheMissReasonMessagesChanged",
+              "model_changed": "#/$defs/CacheMissReasonModelChanged",
+              "params_changed": "#/$defs/CacheMissReasonParamsChanged",
+              "previous_message_not_found": "#/$defs/CacheMissReasonPreviousMessageNotFound",
+              "system_changed": "#/$defs/CacheMissReasonSystemChanged",
+              "tools_changed": "#/$defs/CacheMissReasonToolsChanged",
+              "unavailable": "#/$defs/CacheMissReasonUnavailable"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CacheMissReasonPreviousMessageNotFound"
+            },
+            {
+              "$ref": "#/$defs/CacheMissReasonSystemChanged"
+            },
+            {
+              "$ref": "#/$defs/CacheMissReasonMessagesChanged"
+            },
+            {
+              "$ref": "#/$defs/CacheMissReasonModelChanged"
+            },
+            {
+              "$ref": "#/$defs/CacheMissReasonParamsChanged"
+            },
+            {
+              "$ref": "#/$defs/CacheMissReasonToolsChanged"
+            },
+            {
+              "$ref": "#/$defs/CacheMissReasonUnavailable"
+            }
+          ],
+          "title": "Cache Miss Reason"
+        }
+      },
+      "required": [
+        "cache_miss_reason"
+      ],
+      "title": "MessageDiagnostics",
       "type": "object"
     },
     "MicrocompactBoundarySystemRecord": {
@@ -5623,6 +6814,30 @@
         "sessionId": {
           "title": "Sessionid",
           "type": "string"
+        },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -5679,8 +6894,7 @@
           "type": "string"
         },
         "version": {
-          "title": "Version",
-          "type": "string"
+          "$ref": "#/$defs/CCVersionStrField"
         },
         "gitBranch": {
           "title": "Gitbranch",
@@ -5818,23 +7032,37 @@
           "title": "Description",
           "type": "string"
         },
-        "timeout_ms": {
-          "title": "Timeout Ms",
-          "type": "integer"
-        },
-        "persistent": {
-          "title": "Persistent",
-          "type": "boolean"
-        },
         "command": {
           "title": "Command",
           "type": "string"
+        },
+        "timeout_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout Ms"
+        },
+        "persistent": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Persistent"
         }
       },
       "required": [
         "description",
-        "timeout_ms",
-        "persistent",
         "command"
       ],
       "title": "MonitorToolInput",
@@ -5895,6 +7123,18 @@
           ],
           "default": null,
           "title": "Contentdiffersfromdisk"
+        },
+        "rawContent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rawcontent"
         }
       },
       "required": [
@@ -5903,6 +7143,70 @@
         "content"
       ],
       "title": "NestedMemoryContent",
+      "type": "object"
+    },
+    "NetworkDownConnection": {
+      "additionalProperties": false,
+      "description": "Connection diagnostics for the network-down api_error variant (Claude Code 2.1.161+).",
+      "properties": {
+        "code": {
+          "enum": [
+            "ConnectionRefused",
+            "ECONNRESET",
+            "FailedToOpenSocket"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "isSSLError": {
+          "title": "Issslerror",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "isSSLError"
+      ],
+      "title": "NetworkDownConnection",
+      "type": "object"
+    },
+    "NetworkDownError": {
+      "additionalProperties": false,
+      "description": "Network-down api_error variant (Claude Code 2.1.161+).\n\nDistinct from ApiError (status/headers), NetworkError (cause), and EmptyError\n(null-type-only): identified by required formatted + connection + isNetworkDown.",
+      "properties": {
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "formatted": {
+          "title": "Formatted",
+          "type": "string"
+        },
+        "connection": {
+          "$ref": "#/$defs/NetworkDownConnection"
+        },
+        "isNetworkDown": {
+          "title": "Isnetworkdown",
+          "type": "boolean"
+        },
+        "rateLimits": {
+          "default": null,
+          "title": "Ratelimits",
+          "type": "null"
+        }
+      },
+      "required": [
+        "message",
+        "formatted",
+        "connection",
+        "isNetworkDown"
+      ],
+      "title": "NetworkDownError",
       "type": "object"
     },
     "NetworkError": {
@@ -5999,6 +7303,18 @@
         },
         "filename": {
           "$ref": "#/$defs/PathField"
+        },
+        "displayPath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Displaypath"
         }
       },
       "required": [
@@ -6006,6 +7322,21 @@
         "filename"
       ],
       "title": "OpenedFileInIdeAttachment",
+      "type": "object"
+    },
+    "OutputTokensDetails": {
+      "additionalProperties": false,
+      "description": "Output-token breakdown (Anthropic API usage passthrough).\n\nServer-emitted in message.usage; not a client-binary literal (same\nserver-diagnostic precedent as CacheMissReason).",
+      "properties": {
+        "thinking_tokens": {
+          "title": "Thinking Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "thinking_tokens"
+      ],
+      "title": "OutputTokensDetails",
       "type": "object"
     },
     "PatchHunk": {
@@ -6268,6 +7599,62 @@
       "title": "PrLinkRecord",
       "type": "object"
     },
+    "PreservedCompactMessages": {
+      "additionalProperties": false,
+      "description": "Preserved-message anchors carried across a compaction.",
+      "properties": {
+        "anchorUuid": {
+          "title": "Anchoruuid",
+          "type": "string"
+        },
+        "uuids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Uuids",
+          "type": "array"
+        },
+        "allUuids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Alluuids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "anchorUuid",
+        "uuids",
+        "allUuids"
+      ],
+      "title": "PreservedCompactMessages",
+      "type": "object"
+    },
+    "PreservedCompactSegment": {
+      "additionalProperties": false,
+      "description": "Anchor UUIDs identifying the conversation segment preserved across an auto-compact.",
+      "properties": {
+        "headUuid": {
+          "title": "Headuuid",
+          "type": "string"
+        },
+        "anchorUuid": {
+          "title": "Anchoruuid",
+          "type": "string"
+        },
+        "tailUuid": {
+          "title": "Tailuuid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "headUuid",
+        "anchorUuid",
+        "tailUuid"
+      ],
+      "title": "PreservedCompactSegment",
+      "type": "object"
+    },
     "ProgressRecord": {
       "additionalProperties": false,
       "description": "Progress record for tracking long-running operations (Claude Code 2.1.9+).",
@@ -6313,8 +7700,7 @@
           "type": "string"
         },
         "version": {
-          "title": "Version",
-          "type": "string"
+          "$ref": "#/$defs/CCVersionStrField"
         },
         "gitBranch": {
           "title": "Gitbranch",
@@ -6703,6 +8089,11 @@
           "title": "Prompt"
         },
         "commandMode": {
+          "enum": [
+            "plan",
+            "prompt",
+            "task-notification"
+          ],
           "title": "Commandmode",
           "type": "string"
         },
@@ -6720,6 +8111,31 @@
           ],
           "default": null,
           "title": "Imagepasteids"
+        },
+        "source_uuid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "UUID of the source message that triggered this queued command. Rare (1/355 globally observed); only seen with commandMode=\"prompt\". Set by the SDK replay path (Claude Code 2.1.20+ \u2014 `SDKUserMessageReplay` events when `replayUserMessages` is enabled). Note: snake_case in the wire schema, anomalous vs surrounding camelCase fields.",
+          "title": "Source Uuid"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UserRecordOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Queued-command origin (Claude Code 2.1.157+); see UserRecordOrigin for the kind set."
         }
       },
       "required": [
@@ -6728,6 +8144,38 @@
         "commandMode"
       ],
       "title": "QueuedCommandAttachment",
+      "type": "object"
+    },
+    "RateLimitInfo": {
+      "additionalProperties": false,
+      "description": "Rate-limit fields copied from the server ``anthropic-ratelimit-unified-*`` headers.\n\n``rateLimitType`` is a pass-through ``str``, NOT a Literal: the producer writes the raw\nheader value, so the set is server-defined, not binary-enumerated. The binary only\n*consumes* a known subset (``five_hour``/``seven_day``/``seven_day_opus``/\n``seven_day_sonnet``) -- per the binary-proven gate, consumer checks don't gate, and a\nLiteral would reject server-added types the producer passes through. ``resetsAt`` is a\nunix epoch from the ``-reset`` header.",
+      "properties": {
+        "rateLimitType": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ratelimittype"
+        },
+        "resetsAt": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resetsat"
+        }
+      },
+      "title": "RateLimitInfo",
       "type": "object"
     },
     "ReadFileUnchangedFileInfo": {
@@ -6966,6 +8414,92 @@
       "title": "ReadToolInput",
       "type": "object"
     },
+    "RemoteTriggerToolInput": {
+      "additionalProperties": false,
+      "description": "Input for the RemoteTrigger tool \u2014 claude.ai routines API (Claude Code 2.1.81+).\n\nBinary inputSchema: {action: enum[list|get|create|update|run] (required),\ntrigger_id?, body?}. Only `action` appears in observed session data\n(`{\"action\": \"list\"}`), so it alone is modeled.",
+      "properties": {
+        "action": {
+          "enum": [
+            "list",
+            "get",
+            "create",
+            "update",
+            "run"
+          ],
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "RemoteTriggerToolInput",
+      "type": "object"
+    },
+    "RetryableHttpError": {
+      "additionalProperties": false,
+      "description": "Retryable HTTP api_error (429 rate_limit / 529 overloaded) with the network-diagnostic envelope.\n\nThe server responded with a retryable status, so this carries HTTP ``status`` +\n``requestId`` alongside the same ``formatted``/``connection``/``isNetworkDown``/\n``rateLimits`` envelope as NetworkDownError. Distinct from ApiError (``headers`` +\ncapital-D ``requestID``) and NetworkDownError (no ``status``; ``connection`` is an\nobject): identified by required ``status`` + the envelope. ``connection``/``rateLimits``\nare null on a server-side HTTP error (the socket reached the server). Same binary error\nreducer as NetworkDownError. Spans Claude Code 2.1.161+.",
+      "properties": {
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "integer"
+        },
+        "requestId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requestid"
+        },
+        "formatted": {
+          "title": "Formatted",
+          "type": "string"
+        },
+        "connection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkDownConnection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "isNetworkDown": {
+          "title": "Isnetworkdown",
+          "type": "boolean"
+        },
+        "rateLimits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RateLimitInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "message",
+        "status",
+        "formatted",
+        "connection",
+        "isNetworkDown",
+        "rateLimits"
+      ],
+      "title": "RetryableHttpError",
+      "type": "object"
+    },
     "SavedHookContextRecord": {
       "additionalProperties": false,
       "description": "Saved hook context record for persisting hook output across session boundaries.",
@@ -7011,8 +8545,7 @@
           "type": "string"
         },
         "version": {
-          "title": "Version",
-          "type": "string"
+          "$ref": "#/$defs/CCVersionStrField"
         },
         "gitBranch": {
           "title": "Gitbranch",
@@ -7069,6 +8602,31 @@
       "title": "SavedHookContextRecord",
       "type": "object"
     },
+    "ScheduleWakeupToolInput": {
+      "additionalProperties": false,
+      "description": "Input for ScheduleWakeup tool - arms a /loop dynamic-mode wake heartbeat.\n\ndelaySeconds is the API contract type (zod number, clamped to [60, 3600]\nby the runtime).",
+      "properties": {
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        },
+        "delaySeconds": {
+          "title": "Delayseconds",
+          "type": "integer"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt",
+        "delaySeconds",
+        "reason"
+      ],
+      "title": "ScheduleWakeupToolInput",
+      "type": "object"
+    },
     "ScheduledTaskFireSystemRecord": {
       "additionalProperties": false,
       "description": "System record for scheduled task execution (subtype=scheduled_task_fire, Claude Code 2.1.85+).\n\nEmitted as a transcript marker when /loop or CronCreate tasks fire.",
@@ -7089,6 +8647,30 @@
         "sessionId": {
           "title": "Sessionid",
           "type": "string"
+        },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
         },
         "cwd": {
           "$ref": "#/$defs/PathField"
@@ -7126,8 +8708,7 @@
           "type": "string"
         },
         "version": {
-          "title": "Version",
-          "type": "string"
+          "$ref": "#/$defs/CCVersionStrField"
         },
         "gitBranch": {
           "title": "Gitbranch",
@@ -7168,6 +8749,30 @@
           ],
           "default": null,
           "title": "Agentid"
+        },
+        "teamName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Teamname"
+        },
+        "agentName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agentname"
         }
       },
       "required": [
@@ -7259,24 +8864,42 @@
       "title": "SelectedLinesInIdeAttachment",
       "type": "object"
     },
-    "SendMessagePromptToolInput": {
+    "SendMessageLegacyToolInput": {
       "additionalProperties": false,
-      "description": "SendMessage input using 'prompt' field (Claude Code 2.1.112+).",
+      "description": "Pre-refactor SendMessage wire shape (Claude Code 2.1.63): type/recipient/content, no to/message.",
       "properties": {
-        "to": {
-          "title": "To",
+        "type": {
+          "const": "message",
+          "title": "Type",
           "type": "string"
         },
-        "prompt": {
-          "title": "Prompt",
+        "recipient": {
+          "title": "Recipient",
           "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary"
         }
       },
       "required": [
-        "to",
-        "prompt"
+        "type",
+        "recipient",
+        "content"
       ],
-      "title": "SendMessagePromptToolInput",
+      "title": "SendMessageLegacyToolInput",
       "type": "object"
     },
     "SendMessageRouting": {
@@ -7333,6 +8956,72 @@
       "title": "SendMessageRouting",
       "type": "object"
     },
+    "SendMessageShutdownRequest": {
+      "additionalProperties": false,
+      "description": "Control-message body requesting a teammate shut down.",
+      "properties": {
+        "type": {
+          "const": "shutdown_request",
+          "title": "Type",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "SendMessageShutdownRequest",
+      "type": "object"
+    },
+    "SendMessageShutdownResponse": {
+      "additionalProperties": false,
+      "description": "Control-message body answering a shutdown request.",
+      "properties": {
+        "type": {
+          "const": "shutdown_response",
+          "title": "Type",
+          "type": "string"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "approve": {
+          "title": "Approve",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "type",
+        "request_id",
+        "approve"
+      ],
+      "title": "SendMessageShutdownResponse",
+      "type": "object"
+    },
     "SendMessageSimpleToolInput": {
       "additionalProperties": false,
       "description": "Simplified SendMessage input format (Claude Code 2.1.81+).",
@@ -7355,10 +9044,43 @@
     },
     "SendMessageToolInput": {
       "additionalProperties": false,
-      "description": "Input for SendMessage tool - sends a message to a teammate.",
+      "description": "Input for SendMessage tool \u2014 post-backfill wire shape.\n\nClaude Code's `backfillObservableInput` derives top-level fields from `to`/`message`.\nFor an object `message` (control body): `type` = message.type, `recipient` = to (always),\n`request_id`/`approve` are copied up iff present, and `content` = `message.reason ?? message.feedback`\n(so `content` is absent when the control body carries neither). `reason`/`feedback` never appear as\ntop-level keys. For a string `message`: `type='message'`, `recipient` = to, `content` = message.\nThe raw two-field form is SendMessageSimpleToolInput.",
       "properties": {
+        "to": {
+          "title": "To",
+          "type": "string"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "discriminator": {
+                "mapping": {
+                  "shutdown_request": "#/$defs/SendMessageShutdownRequest",
+                  "shutdown_response": "#/$defs/SendMessageShutdownResponse"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/SendMessageShutdownRequest"
+                },
+                {
+                  "$ref": "#/$defs/SendMessageShutdownResponse"
+                }
+              ]
+            }
+          ],
+          "title": "Message"
+        },
         "type": {
-          "const": "message",
+          "enum": [
+            "message",
+            "shutdown_request",
+            "shutdown_response"
+          ],
           "title": "Type",
           "type": "string"
         },
@@ -7367,19 +9089,59 @@
           "type": "string"
         },
         "content": {
-          "title": "Content",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
         },
         "summary": {
-          "title": "Summary",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Id"
+        },
+        "approve": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approve"
         }
       },
       "required": [
+        "to",
+        "message",
         "type",
-        "recipient",
-        "content",
-        "summary"
+        "recipient"
       ],
       "title": "SendMessageToolInput",
       "type": "object"
@@ -7408,6 +9170,45 @@
       "title": "SendMessageToolResult",
       "type": "object"
     },
+    "SendUserFileToolInput": {
+      "additionalProperties": false,
+      "description": "Input for the SendUserFile tool \u2014 delivers files to the user (Claude Code 2.1.142+).\n\nBinary inputSchema: {files: array(string).min(1) (required), status: enum[normal|proactive]\n(required), caption?}. Surfaces artifacts (screenshots, reports) \u2014 `proactive` pushes\nunprompted, `normal` accompanies a reply.",
+      "properties": {
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "normal",
+            "proactive"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "caption": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caption"
+        }
+      },
+      "required": [
+        "files",
+        "status"
+      ],
+      "title": "SendUserFileToolInput",
+      "type": "object"
+    },
     "ServerToolUse": {
       "additionalProperties": false,
       "description": "Server-side tool use tracking.",
@@ -7426,6 +9227,36 @@
         "web_fetch_requests"
       ],
       "title": "ServerToolUse",
+      "type": "object"
+    },
+    "SessionModeRecord": {
+      "additionalProperties": false,
+      "description": "Records the active session mode for a session.\n\nResumption-state sidecar written alongside PermissionModeRecord; does NOT\ninherit from BaseRecord -- minimal schema with no uuid/timestamp. Binary\n``$.push({type:\"mode\",mode:this.currentSessionMode,sessionId:q})`` where mode is\n``isCoordinatorMode() ? \"coordinator\" : \"normal\"`` (same projection as\nIsolationLatchRecord.side).",
+      "properties": {
+        "type": {
+          "const": "mode",
+          "title": "Type",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "coordinator",
+            "normal"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "mode",
+        "sessionId"
+      ],
+      "title": "SessionModeRecord",
       "type": "object"
     },
     "SimpleThinkingMetadata": {
@@ -7463,6 +9294,21 @@
         "isInitial": {
           "title": "Isinitial",
           "type": "boolean"
+        },
+        "names": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Names"
         }
       },
       "required": [
@@ -7536,6 +9382,32 @@
       "title": "SkillToolResult",
       "type": "object"
     },
+    "SpeculationAcceptRecord": {
+      "additionalProperties": false,
+      "description": "Records a speculative-decoding acceptance and the wall-time it saved.\n\nBinary ``appendFile(sessionFile,{type:\"speculation-accept\",timestamp,timeSavedMs})``,\nwritten only when ``timeSavedMs > 0``. No sessionId/uuid envelope.",
+      "properties": {
+        "type": {
+          "const": "speculation-accept",
+          "title": "Type",
+          "type": "string"
+        },
+        "timestamp": {
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "timeSavedMs": {
+          "title": "Timesavedms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "timestamp",
+        "timeSavedMs"
+      ],
+      "title": "SpeculationAcceptRecord",
+      "type": "object"
+    },
     "StatusChange": {
       "additionalProperties": false,
       "description": "Status transition details.",
@@ -7577,6 +9449,30 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -7613,6 +9509,21 @@
           },
           "title": "Hookerrors",
           "type": "array"
+        },
+        "hookAdditionalContext": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hookadditionalcontext"
         },
         "preventedContinuation": {
           "title": "Preventedcontinuation",
@@ -7671,14 +9582,13 @@
         "version": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/CCVersionStrField"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Version"
+          "default": null
         },
         "gitBranch": {
           "anyOf": [
@@ -7771,6 +9681,13 @@
       "title": "StopHookSummarySystemRecord",
       "type": "object"
     },
+    "StructuredOutputToolInput": {
+      "additionalProperties": true,
+      "description": "Input for the StructuredOutput built-in (Workflow structured output, 2.1.146+).\n\nThe tool's binary inputSchema is z.object({}).passthrough() \u2014 an arbitrary, caller-defined\npayload (the workflow's per-call JSON Schema), so no fields are modeled. A distinct named type\n(vs the MCP fallback) keeps the artifact observably a Claude Code built-in; ToolUseContent\nre-types it from the permissive fallback \u2014 it is never matched directly, since MCPToolInput\ncatches first in the left-to-right union.",
+      "properties": {},
+      "title": "StructuredOutputToolInput",
+      "type": "object"
+    },
     "SummaryRecord": {
       "additionalProperties": false,
       "description": "Session summary record (minimal schema, no uuid/timestamp).\n\nNOTE: Zero occurrences observed in recent sessions (50+ files, 521K+ records).\nCompaction now uses UserRecord with isCompactSummary=True instead.\nThis type may be from an earlier Claude Code version. Kept for backward compatibility.",
@@ -7818,6 +9735,30 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -7854,9 +9795,59 @@
       "title": "SystemRecord",
       "type": "object"
     },
+    "TagRecord": {
+      "additionalProperties": false,
+      "description": "User-assigned session tag.\n\nBinary rich path ``append([{type:\"tag\",tag,sessionId,uuid,timestamp}])`` (set-tag\nhandler); the metadata-reemit path ``$.push({type:\"tag\",tag,sessionId})`` omits\nuuid/timestamp. ``tag`` is ``\"\"`` when cleared. Distinct from the slash-command\nparser's ``{type:\"tag\",path,push,...}``, which is not a record.",
+      "properties": {
+        "type": {
+          "const": "tag",
+          "title": "Type",
+          "type": "string"
+        },
+        "tag": {
+          "title": "Tag",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        },
+        "uuid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uuid"
+        },
+        "timestamp": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp"
+        }
+      },
+      "required": [
+        "type",
+        "tag",
+        "sessionId"
+      ],
+      "title": "TagRecord",
+      "type": "object"
+    },
     "TaskCreateToolInput": {
       "additionalProperties": false,
-      "description": "Input for TaskCreate tool - creates a new task in the task list.\n\nFields:\n    subject: Brief title for the task (imperative form, e.g., \"Run tests\")\n    description: Detailed description of what needs to be done\n    activeForm: Present continuous form shown in spinner (e.g., \"Running tests\")",
+      "description": "Input for TaskCreate tool - creates a new task in the task list.\n\nFields:\n    subject: Brief title for the task (imperative form, e.g., \"Run tests\")\n    description: Detailed description of what needs to be done\n    activeForm: Present continuous form shown in spinner (e.g., \"Running tests\")\n    metadata: Arbitrary caller metadata; binary schema: v.record(v.string(), v.unknown()).optional()",
       "properties": {
         "subject": {
           "title": "Subject",
@@ -7877,6 +9868,19 @@
           ],
           "default": null,
           "title": "Activeform"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
         }
       },
       "required": [
@@ -8175,6 +10179,31 @@
           ],
           "default": null,
           "title": "Activeform"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
         }
       },
       "required": [
@@ -8220,6 +10249,70 @@
         "task"
       ],
       "title": "TaskSingleToolResult",
+      "type": "object"
+    },
+    "TaskStatusAttachment": {
+      "additionalProperties": false,
+      "description": "Background-execution status delta (the ``claude agents`` / Agent-tool runtime).\n\nA \"task\" here is a background job (``taskType`` local_agent | local_bash; for an agent\n``taskId`` IS the agentId) -- the runtime sense, NOT the TaskCreate/TaskUpdate TODO\ntracker (tell them apart by status: TODO is pending/in_progress/completed; runtime is\nqueued/running/completed/failed/killed). Binary ``{type:\"task_status\",taskId,taskType,\nstatus,description,deltaSummary,outputFilePath}``; ``deltaSummary`` is the running\nprogress summary else the error (nullable). ``status`` is binary-enumerated (literal\nwrite sites), unlike server pass-throughs like RateLimitInfo.rateLimitType.",
+      "properties": {
+        "type": {
+          "const": "task_status",
+          "title": "Type",
+          "type": "string"
+        },
+        "taskId": {
+          "title": "Taskid",
+          "type": "string"
+        },
+        "taskType": {
+          "enum": [
+            "local_agent",
+            "local_bash"
+          ],
+          "title": "Tasktype",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "failed",
+            "killed",
+            "queued",
+            "running"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "deltaSummary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Deltasummary"
+        },
+        "outputFilePath": {
+          "title": "Outputfilepath",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "taskId",
+        "taskType",
+        "status",
+        "description",
+        "deltaSummary",
+        "outputFilePath"
+      ],
+      "title": "TaskStatusAttachment",
       "type": "object"
     },
     "TaskStopToolResult": {
@@ -8637,7 +10730,7 @@
     },
     "TaskUpdateToolInput": {
       "additionalProperties": false,
-      "description": "Input for TaskUpdate tool - updates an existing task.\n\nFields:\n    taskId: ID of the task to update (required)\n    status: New status (pending, in_progress, completed)\n    description: New description for the task\n    owner: Agent/worker name to assign the task to\n    addBlockedBy: Task IDs that block this task",
+      "description": "Input for TaskUpdate tool - updates an existing task.\n\nFields:\n    taskId: ID of the task to update (required)\n    status: New status (pending, in_progress, completed)\n    description: New description for the task\n    owner: Agent/worker name to assign the task to\n    addBlockedBy: Task IDs that block this task\n    metadata: Arbitrary caller metadata; binary schema: v.record(v.string(), v.unknown()).optional()",
       "properties": {
         "taskId": {
           "title": "Taskid",
@@ -8738,6 +10831,19 @@
           ],
           "default": null,
           "title": "Addblockedby"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
         }
       },
       "required": [
@@ -8757,6 +10863,18 @@
         "description": {
           "title": "Description",
           "type": "string"
+        },
+        "agent_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Type"
         }
       },
       "required": [
@@ -9080,6 +11198,17 @@
           ],
           "default": null,
           "title": "Research Preview 2026 02"
+        },
+        "output_tokens_details": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputTokensDetails"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -9280,9 +11409,6 @@
         "input": {
           "anyOf": [
             {
-              "$ref": "#/$defs/MalformedWriteToolInput"
-            },
-            {
               "$ref": "#/$defs/WriteToolInput"
             },
             {
@@ -9301,7 +11427,10 @@
               "$ref": "#/$defs/SendMessageSimpleToolInput"
             },
             {
-              "$ref": "#/$defs/SendMessagePromptToolInput"
+              "$ref": "#/$defs/SendMessageLegacyToolInput"
+            },
+            {
+              "$ref": "#/$defs/SendUserFileToolInput"
             },
             {
               "$ref": "#/$defs/TaskToolInput"
@@ -9364,7 +11493,13 @@
               "$ref": "#/$defs/CronDeleteToolInput"
             },
             {
+              "$ref": "#/$defs/ScheduleWakeupToolInput"
+            },
+            {
               "$ref": "#/$defs/SkillToolInput"
+            },
+            {
+              "$ref": "#/$defs/RemoteTriggerToolInput"
             },
             {
               "$ref": "#/$defs/ExitPlanModeToolInput"
@@ -9385,6 +11520,9 @@
               "$ref": "#/$defs/PushNotificationToolInput"
             },
             {
+              "$ref": "#/$defs/WorkflowToolInput"
+            },
+            {
               "$ref": "#/$defs/TaskListToolInput"
             },
             {
@@ -9395,6 +11533,9 @@
             },
             {
               "$ref": "#/$defs/MCPToolInput"
+            },
+            {
+              "$ref": "#/$defs/StructuredOutputToolInput"
             }
           ],
           "title": "Input"
@@ -9441,6 +11582,30 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -9476,6 +11641,30 @@
           "default": null,
           "title": "Messagecount"
         },
+        "pendingBackgroundAgentCount": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pendingbackgroundagentcount"
+        },
+        "pendingWorkflowCount": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pendingworkflowcount"
+        },
         "isMeta": {
           "title": "Ismeta",
           "type": "boolean"
@@ -9489,8 +11678,7 @@
           "type": "string"
         },
         "version": {
-          "title": "Version",
-          "type": "string"
+          "$ref": "#/$defs/CCVersionStrField"
         },
         "gitBranch": {
           "title": "Gitbranch",
@@ -9575,6 +11763,22 @@
       "title": "TurnDurationSystemRecord",
       "type": "object"
     },
+    "UltrathinkEffortAttachment": {
+      "additionalProperties": false,
+      "description": "Ultrathink effort-level indicator for the turn (Claude Code 2.1.139+).\n\nMarker injected when an ultrathink trigger raises the turn's thinking\neffort; carries no payload beyond the type tag.",
+      "properties": {
+        "type": {
+          "const": "ultrathink_effort",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "UltrathinkEffortAttachment",
+      "type": "object"
+    },
     "UsageIteration": {
       "additionalProperties": false,
       "description": "A single internal iteration within a turn's token usage (Claude Code 2.1.100+).\n\nPopulated when the turn runs multiple internal inference iterations\n(e.g., adaptive thinking with tool loops). All 6 fields are always present.",
@@ -9635,6 +11839,7 @@
           "type": "array"
         },
         "multiSelect": {
+          "default": false,
           "title": "Multiselect",
           "type": "boolean"
         }
@@ -9642,8 +11847,7 @@
       "required": [
         "question",
         "header",
-        "options",
-        "multiSelect"
+        "options"
       ],
       "title": "UserQuestion",
       "type": "object"
@@ -9669,6 +11873,30 @@
           "title": "Sessionid",
           "type": "string"
         },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
         "cwd": {
           "$ref": "#/$defs/PathField"
         },
@@ -9693,8 +11921,7 @@
           "type": "string"
         },
         "version": {
-          "title": "Version",
-          "type": "string"
+          "$ref": "#/$defs/CCVersionStrField"
         },
         "gitBranch": {
           "title": "Gitbranch",
@@ -10115,6 +12342,25 @@
           "description": "Prompt identifier (Claude Code 2.1.74+)",
           "title": "Promptid"
         },
+        "promptSource": {
+          "anyOf": [
+            {
+              "enum": [
+                "queued",
+                "sdk",
+                "system",
+                "typed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Prompt origin (Claude Code 2.1.161+): non-interactive\u2192'sdk', isMeta\u2192'system', queued-replay\u2192'queued', else 'typed'.",
+          "title": "Promptsource"
+        },
         "entrypoint": {
           "anyOf": [
             {
@@ -10153,6 +12399,19 @@
           "default": null,
           "description": "Agent name within team (may be absent for lead agent)",
           "title": "Agentname"
+        },
+        "interruptedMessageId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "API message ID (msg_*) of the assistant message interrupted by this user input (Claude Code 2.1.149+).",
+          "title": "Interruptedmessageid"
         }
       },
       "required": [
@@ -10173,9 +12432,16 @@
     },
     "UserRecordOrigin": {
       "additionalProperties": false,
-      "description": "Origin metadata for user records (Claude Code 2.1.87+).",
+      "description": "Origin metadata shared by UserRecord.origin and QueuedCommandAttachment.origin (2.1.87+).\n\nkind is the closed origin-producer set; 'human' is consumer-guard-only (no producer).",
       "properties": {
         "kind": {
+          "enum": [
+            "auto-continuation",
+            "channel",
+            "coordinator",
+            "peer",
+            "task-notification"
+          ],
           "title": "Kind",
           "type": "string"
         }
@@ -10441,6 +12707,89 @@
       "title": "WebSearchToolResult",
       "type": "object"
     },
+    "WorkflowKeywordRequestAttachment": {
+      "additionalProperties": false,
+      "description": "Workflow-trigger keyword detected in the prompt (Claude Code 2.1.153+).\n\nMarker injected when a prompt's \"workflow\" keyword may trigger a dynamic\nworkflow; carries no payload beyond the type tag.",
+      "properties": {
+        "type": {
+          "const": "workflow_keyword_request",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "WorkflowKeywordRequestAttachment",
+      "type": "object"
+    },
+    "WorkflowToolInput": {
+      "additionalProperties": false,
+      "description": "Input for the Workflow tool \u2014 multi-agent orchestration (Claude Code 2.1.146+).\n\nBinary inputSchema: {script?, name?, scriptPath?, resumeFromRunId?, args?,\ndescription?, title?} \u2014 all optional (a refine requires one of script/name/scriptPath).\nThe inline-script (`script`), on-disk-script (`scriptPath`), and saved-workflow (`name` + `args`)\nforms all appear in observed data; description/title remain binary-only and unmodeled.\n`args` is an arbitrary caller-supplied JSON value passed verbatim to the run.",
+      "properties": {
+        "script": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Script"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "args": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "scriptPath": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scriptpath"
+        },
+        "resumeFromRunId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resumefromrunid"
+        }
+      },
+      "title": "WorkflowToolInput",
+      "type": "object"
+    },
     "WorktreeSessionData": {
       "additionalProperties": false,
       "description": "Worktree session metadata embedded in WorktreeStateRecord.",
@@ -10458,8 +12807,16 @@
           "type": "string"
         },
         "worktreeBranch": {
-          "title": "Worktreebranch",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Worktreebranch"
         },
         "sessionId": {
           "title": "Sessionid",
@@ -10506,7 +12863,6 @@
         "originalCwd",
         "worktreePath",
         "worktreeName",
-        "worktreeBranch",
         "sessionId"
       ],
       "title": "WorktreeSessionData",
@@ -10672,6 +13028,9 @@
       "$ref": "#/$defs/AwaySummarySystemRecord"
     },
     {
+      "$ref": "#/$defs/AgentsKilledSystemRecord"
+    },
+    {
       "$ref": "#/$defs/SystemRecord"
     },
     {
@@ -10696,6 +13055,9 @@
       "$ref": "#/$defs/AgentNameRecord"
     },
     {
+      "$ref": "#/$defs/AiTitleRecord"
+    },
+    {
       "$ref": "#/$defs/LastPromptRecord"
     },
     {
@@ -10703,6 +13065,33 @@
     },
     {
       "$ref": "#/$defs/PermissionModeRecord"
+    },
+    {
+      "$ref": "#/$defs/SessionModeRecord"
+    },
+    {
+      "$ref": "#/$defs/BridgeSessionRecord"
+    },
+    {
+      "$ref": "#/$defs/TagRecord"
+    },
+    {
+      "$ref": "#/$defs/AgentColorRecord"
+    },
+    {
+      "$ref": "#/$defs/AgentSettingRecord"
+    },
+    {
+      "$ref": "#/$defs/IsolationLatchRecord"
+    },
+    {
+      "$ref": "#/$defs/SpeculationAcceptRecord"
+    },
+    {
+      "$ref": "#/$defs/ContentReplacementRecord"
+    },
+    {
+      "$ref": "#/$defs/ForkContextRefRecord"
     },
     {
       "$ref": "#/$defs/AttachmentRecord"
@@ -10715,11 +13104,9 @@
   "$id": "https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json",
   "title": "Claude Code Session Record",
   "description": "Complete schema for Claude Code session JSONL records",
-  "x-schema-version": "0.2.26",
+  "x-schema-version": "0.2.42",
   "x-claude-code-compatibility": {
     "min": "2.0.35",
-    "max": "2.1.119",
-    "last_validated": "2026-04-24",
-    "validation_record_count": 152992
+    "max": "2.1.163"
   }
 }

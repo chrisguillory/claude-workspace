@@ -43,7 +43,6 @@ import hashlib
 import json
 import os
 import stat
-import struct
 import subprocess
 import sys
 import tempfile
@@ -57,6 +56,8 @@ import typer
 from cc_lib.claude_binary_patching import ORIGINALS_DIR, scan_binary
 from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.macho import MachOSignature
+from cc_lib.picklable import PickleByInitArgs
 from cc_lib.schemas.base import ClosedModel, OpenModel
 from cc_lib.types import CCVersion
 
@@ -326,63 +327,6 @@ def cli_run(
 add_install_command(app, script_path=__file__)
 
 
-class MachOSignature:
-    """Detect ad-hoc vs Anthropic-signed from Mach-O CodeDirectory flags.
-
-    Reads under 200 bytes from the file header — no full binary load needed.
-    The CS_ADHOC bit (0x2) in CodeDirectory flags is set by our patcher's
-    ad-hoc codesign and absent on Anthropic's original Developer ID signature.
-    """
-
-    MH_MAGIC_64 = 0xFEEDFACF
-    LC_CODE_SIGNATURE = 0x1D
-    CS_ADHOC = 0x2
-    CSMAGIC_EMBEDDED_SIGNATURE = 0xFADE0CC0
-    CSMAGIC_CODEDIRECTORY = 0xFADE0C02
-
-    @classmethod
-    def is_adhoc(cls, path: Path) -> bool | None:
-        """Check if a Mach-O binary has an ad-hoc code signature.
-
-        Returns True (ad-hoc/modified), False (real signature), or None
-        (not a valid Mach-O or no code signature found).
-        """
-        try:
-            with path.open('rb') as f:
-                magic = struct.unpack('<I', f.read(4))[0]
-                if magic != cls.MH_MAGIC_64:
-                    return None
-
-                f.seek(16)
-                ncmds = struct.unpack('<I', f.read(4))[0]
-                f.seek(32)
-
-                for _ in range(ncmds):
-                    pos = f.tell()
-                    cmd, cmdsize = struct.unpack('<II', f.read(8))
-                    if cmd == cls.LC_CODE_SIGNATURE:
-                        dataoff = struct.unpack('<I', f.read(4))[0]
-                        f.seek(dataoff)
-                        cs_magic = struct.unpack('>I', f.read(4))[0]
-                        if cs_magic != cls.CSMAGIC_EMBEDDED_SIGNATURE:
-                            return None
-                        _cs_length, cs_count = struct.unpack('>II', f.read(8))
-                        for _ in range(cs_count):
-                            blob_type, blob_offset = struct.unpack('>II', f.read(8))
-                            if blob_type == 0:  # CSSLOT_CODEDIRECTORY
-                                f.seek(dataoff + blob_offset)
-                                cd_magic = struct.unpack('>I', f.read(4))[0]
-                                if cd_magic != cls.CSMAGIC_CODEDIRECTORY:
-                                    return None
-                                _cd_length, _cd_version, cd_flags = struct.unpack('>III', f.read(12))
-                                return bool(cd_flags & cls.CS_ADHOC)
-                        return None
-                    f.seek(pos + cmdsize)
-        except (OSError, struct.error):
-            return None
-        return None
-
-
 class VersionStore:
     """Local version inventory and cleanup.
 
@@ -599,7 +543,7 @@ def _is_published_on_npm(version: str) -> bool:
         return True
 
 
-class VersionNotPublished(LookupError):
+class VersionNotPublished(PickleByInitArgs, LookupError):
     """A Claude Code version that was never published (skipped release number or typo).
 
     Distinct from VersionExpiredFromCDN — npm cross-check confirmed the version
@@ -611,7 +555,7 @@ class VersionNotPublished(LookupError):
         super().__init__(f'Version {version} was never published')
 
 
-class VersionExpiredFromCDN(LookupError):
+class VersionExpiredFromCDN(PickleByInitArgs, LookupError):
     """A published version that is no longer available on the CDN (~9 month retention)."""
 
     def __init__(self, version: str) -> None:

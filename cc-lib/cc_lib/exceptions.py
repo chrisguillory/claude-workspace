@@ -3,6 +3,7 @@
 CCLibError                                # base for all cc_lib exceptions
 ├── ClaudeContextError                    # session-context failures
 │   ├── ClaudeProcessNotFoundError        # no Claude ancestor in process tree
+│   │                                     # OR metadata lacks process_created_at anchor
 │   ├── SessionNotFoundError              # session not in sessions.json
 │   ├── InactiveSessionError              # session in sessions.json but state != 'active'
 │   ├── MultipleActiveSessionsForPidError # multiple sessions claim the same claude_pid
@@ -14,6 +15,8 @@ CCLibError                                # base for all cc_lib exceptions
 from __future__ import annotations
 
 from pathlib import Path
+
+from cc_lib.picklable import PickleByInitArgs
 
 __all__ = [
     'CCLibError',
@@ -37,7 +40,12 @@ class ClaudeContextError(CCLibError):
 
 
 class ClaudeProcessNotFoundError(ClaudeContextError):
-    """No Claude binary found in parent process tree (codesign-verified walk)."""
+    """Could not materialize a ClaudeProcess.
+
+    Raised by ``find_claude_process`` when the codesign-verified parent walk
+    finds no Claude binary, and by ``ClaudeProcess.from_session_metadata`` when
+    persisted metadata lacks the ``process_created_at`` anchor.
+    """
 
 
 class SessionNotFoundError(ClaudeContextError):
@@ -55,7 +63,7 @@ class MultipleActiveSessionsForPidError(ClaudeContextError):
     """
 
 
-class MissingEnvVarError(ClaudeContextError):
+class MissingEnvVarError(PickleByInitArgs, ClaudeContextError):
     """A required environment variable is not set."""
 
     def __init__(self, var_name: str) -> None:
@@ -63,7 +71,7 @@ class MissingEnvVarError(ClaudeContextError):
         self.var_name = var_name
 
 
-class HookTreeMismatchError(CCLibError):
+class HookTreeMismatchError(PickleByInitArgs, CCLibError):
     """Hook script's location does not match CLAUDE_EXEC_LAUNCH_DIR/hooks."""
 
     def __init__(self, *, actual: Path, expected: Path) -> None:
@@ -75,7 +83,7 @@ class HookTreeMismatchError(CCLibError):
         )
 
 
-class RivalSessionError(CCLibError):
+class RivalSessionError(PickleByInitArgs, CCLibError):
     """Another live claude process owns this session_id."""
 
     def __init__(self, *, session_id: str, rival_pid: int, claude_pid: int) -> None:

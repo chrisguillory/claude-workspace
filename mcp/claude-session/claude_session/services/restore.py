@@ -22,7 +22,7 @@ from cc_lib.settings_env import claude_binary_name
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 
 from claude_session.introspection import get_path_fields
-from claude_session.schemas.operations.archive import SessionArchive
+from claude_session.schemas.operations.archive import AgentMetadataEntry, SessionArchive
 from claude_session.schemas.operations.restore import RestoreResult
 from claude_session.schemas.session import CustomTitleRecord, SessionRecord
 from claude_session.schemas.session.models import validate_session_record
@@ -31,6 +31,9 @@ from claude_session.services.artifacts import (
     ToolResultDirectory,
     ToolResultDirectoryFile,
     ToolResultFile,
+    agent_dest_path,
+    agent_metadata_relpath,
+    apply_agent_id_mapping,
     create_session_env_dir,
     generate_agent_id_mapping,
     generate_clone_custom_title,
@@ -38,6 +41,7 @@ from claude_session.services.artifacts import (
     get_session_env_dir,
     get_tasks_dir,
     get_todos_dir,
+    remap_workflow_run_json,
     write_agent_metadata,
     write_debug_log,
     write_jsonl,
@@ -48,6 +52,8 @@ from claude_session.services.artifacts import (
     write_tasks,
     write_todos,
     write_tool_results,
+    write_workflow_journals,
+    write_workflow_runs,
 )
 from claude_session.services.lineage import LineageService
 
@@ -227,18 +233,20 @@ class SessionRestoreService:
                 new_agent_id = agent_id_mapping[agent.agent_id]
 
             new_filename = f'agent-{new_agent_id}.jsonl'
-
-            if agent.nested:
-                # Nested: <target>/<new_session_id>/subagents/agent-*.jsonl
-                all_output_paths.append(target_dir / new_session_id / 'subagents' / new_filename)
-            else:
-                # Flat: <target>/agent-*.jsonl
-                all_output_paths.append(target_dir / new_filename)
+            all_output_paths.append(agent_dest_path(target_dir, new_session_id, agent, new_filename))
 
         # 2b. Agent metadata sidecars (always nested; agent_id remapped on fork)
         for meta in archive.agent_metadata:
-            new_agent_id = meta.agent_id if in_place else agent_id_mapping[meta.agent_id]
-            all_output_paths.append(target_dir / new_session_id / 'subagents' / f'agent-{new_agent_id}.meta.json')
+            meta_relpath = _restored_meta_relpath(meta, in_place, agent_id_mapping)
+            all_output_paths.append(target_dir / new_session_id / 'subagents' / meta_relpath)
+
+        # 2c. Workflow run-journals (runId unchanged on fork; subagents-relative path identical)
+        all_output_paths.extend(
+            target_dir / new_session_id / 'subagents' / relpath for relpath in archive.workflow_journals
+        )
+
+        # 2d. Workflow run metadata + scripts under <session>/workflows/ (runId paths preserved on fork)
+        all_output_paths.extend(target_dir / new_session_id / relpath for relpath in archive.workflow_runs)
 
         # 3. Tool results (flat files + directory files)
         has_tool_results = archive.tool_results or archive.tool_result_dirs
@@ -416,12 +424,7 @@ class SessionRestoreService:
                 new_agent_id = agent_id_mapping[agent.agent_id]
 
             new_filename = f'agent-{new_agent_id}.jsonl'
-
-            # Determine output path based on nested flag
-            if agent.nested:
-                output_path = target_dir / new_session_id / 'subagents' / new_filename
-            else:
-                output_path = target_dir / new_filename
+            output_path = agent_dest_path(target_dir, new_session_id, agent, new_filename)
 
             # Create parent directories
             output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -446,11 +449,41 @@ class SessionRestoreService:
         agent_metadata_restored = 0
         if archive.agent_metadata:
             remapped_metadata = {
-                f'agent-{meta.agent_id if in_place else agent_id_mapping[meta.agent_id]}.meta.json': meta.content
+                _restored_meta_relpath(meta, in_place, agent_id_mapping): meta.content
                 for meta in archive.agent_metadata
             }
             agent_metadata_restored = write_agent_metadata(target_dir, new_session_id, remapped_metadata)
             logger.info('Restored %d agent metadata sidecars', agent_metadata_restored)
+
+        # Restore Workflow run-journals (agent + session ids remapped; runId path identity preserved)
+        if archive.workflow_journals:
+            remapped_journals = {
+                relpath: apply_agent_id_mapping(content, agent_id_mapping).replace(archive.session_id, new_session_id)
+                for relpath, content in archive.workflow_journals.items()
+            }
+            journals_restored = write_workflow_journals(target_dir, new_session_id, remapped_journals)
+            logger.info('Restored %d workflow run-journals', journals_restored)
+
+        # Restore Workflow run metadata + scripts (run metadata gets id/path remap; scripts verbatim)
+        if archive.workflow_runs:
+            path_replacements = None
+            if translator:
+                path_replacements = {
+                    archive.original_project_path: str(self.project_path),
+                    encode_project_path(Path(archive.original_project_path)): encode_project_path(self.project_path),
+                }
+            remapped_runs = {
+                relpath: (
+                    remap_workflow_run_json(
+                        content, agent_id_mapping, archive.session_id, new_session_id, path_replacements
+                    )
+                    if relpath.endswith('.json')
+                    else content
+                )
+                for relpath, content in archive.workflow_runs.items()
+            }
+            runs_restored = write_workflow_runs(target_dir, new_session_id, remapped_runs)
+            logger.info('Restored %d workflow run files', runs_restored)
 
         # Record lineage (only for non-in-place restores)
         if not in_place:
@@ -611,3 +644,13 @@ def get_restoration_timestamp(session_id: str) -> datetime | None:
     timestamp_ms = int.from_bytes(uid.bytes[:6], 'big')
     timestamp_s = timestamp_ms / 1000
     return datetime.fromtimestamp(timestamp_s, tz=UTC)
+
+
+def _restored_meta_relpath(
+    meta: AgentMetadataEntry,
+    in_place: bool,
+    agent_id_mapping: Mapping[str, str],
+) -> str:
+    """subagents-relative path for a restored sidecar, preserving any workflow nesting."""
+    new_agent_id = meta.agent_id if in_place else agent_id_mapping[meta.agent_id]
+    return agent_metadata_relpath(new_agent_id, meta.workflow_subpath)

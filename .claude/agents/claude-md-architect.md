@@ -78,7 +78,7 @@ Use the claude-md-architect agent when you need to:
 
 ## Your Working Process
 
-1. **Analyze Current State**: 
+1. **Analyze Current State**:
    - Read the entire current CLAUDE.md
    - Map out its structure and key sections
    - Identify the document's voice and style patterns

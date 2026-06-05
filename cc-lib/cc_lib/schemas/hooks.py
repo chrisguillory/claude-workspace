@@ -291,6 +291,12 @@ class _HookInputBase(StrictModel):
     SubagentStop, etc.) on a model that supports the effort parameter; absent for
     session-lifecycle hooks and models without effort support.
     """
+    session_title: str | None = None
+    """Human-readable session title (``/rename`` or auto-derived).
+
+    Carried on hook inputs once a title exists — including SessionStart on resume
+    of a titled session. Absent before a title is set.
+    """
 
 
 # Session lifecycle
@@ -517,7 +523,6 @@ class UserPromptSubmitHookInput(_HookInputBase):
 
     hook_event_name: Literal['UserPromptSubmit']
     prompt: str
-    session_title: str | None = None
 
 
 class UserPromptExpansionHookInput(_HookInputBase):

@@ -58,6 +58,8 @@ Principles describe the north star, not the minimum bar. New code embodies them;
 | **Worse is Better**                           | Simple, working solutions over perfect designs                                                                 |
 | **Make It Work, Make It Right, Make It Fast** | In that order                                                                                                  |
 | **Avoid Premature Optimization**              | Optimize when data shows need                                                                                  |
+| **Concrete over abstract**                    | Favor a focused class; add an ABC/Protocol only when ≥2 implementations dispatch polymorphically               |
+| **Minimal diffs**                             | Change only what the task needs — don't rewrite or reflow unchanged code/prose                                 |
 | **Principle of least surprise**               | Code should behave as expected                                                                                 |
 | **Bubble exceptions**                         | Easier to Ask Forgiveness (EAFP) over Look Before You Leap (LBYL) — let exceptions propagate to handlers       |
 | **Leverage existing infrastructure**          | Don't reimplement what a decorator, handler, or base class already provides                                    |
@@ -67,6 +69,8 @@ Principles describe the north star, not the minimum bar. New code embodies them;
 | **Assertions only in tests/**                 | Application code raises exceptions explicitly                                                                  |
 | **Tests earn their place**                    | Automated tests cover what empirical use can't — regressions and hard-to-stage edge cases. Happy-path coverage is redundant with manual end-to-end. |
 | **Ideal state over backwards compat**         | Dev-only repo — fix sources over workarounds; rename cleanly, no migration shims or doc-as-bandaid              |
+| **Fork or patch, don't wait**                 | Bleeding edge by default. Take the best from across forks and sister projects; patch what's missing; don't block on third-party release cadence. |
+| **Layered architecture**                      | Place each unit in the layer that owns its concern; trace symptoms to the layer that owns the cause; create a missing layer when duplication signals one |
 | **DI via closures**                           | FastMCP pattern for dependency injection                                                                       |
 
 ### Ideal State
@@ -89,6 +93,32 @@ Principles describe the north star, not the minimum bar. New code embodies them;
 **When to consider a doc-side note instead of a code fix:** the tool is owned by an upstream you can't change (and a PR is impractical), or the behavior is intentional and a code change would break other consumers. Almost never the case in this repo — when in doubt, fix the source.
 
 **Lead options with the ideal-state choice.** When presenting design alternatives, the option that best matches stated principles goes first. Don't order by smallest-diff or least-disruptive — that's a generic engineering bias that contradicts the dev-only repo's stated values.
+
+### Fork or patch, don't wait
+
+**Bleeding edge is the default. We bring the best of the ecosystem into the fold rather than wait for it.** When a library is deprecated, we adopt the active fork. When it lacks a feature, we carry a patch series. When a CLI doesn't exist, we write one. When multiple implementations each get part of a problem right, we combine the best of each into a single tool that gets all of it right.
+
+Already lived in this workspace:
+
+- **`mcp/imessage-kit/`** — "combines the best of five MIT-licensed implementations" of iMessage access, handling things "no existing tool gets fully right" (attributedBody parsing, edited messages, HEIC conversion, contact resolution)
+- **`cc_lib/claude_binary_patching.py`** — patches the Claude Code binary across its daily upstream releases
+- **`cc_lib/types.py:CCVersion`** — subclasses `packaging.version.Version` to add Claude Code-specific parsing (strips the `(Claude Code)` suffix from `claude --version` output) rather than waiting for upstream packaging to accommodate it
+- **`mcp/claude-remote-audio/swift/`** (planned — on `feat/claude-remote-audio-scaffold`) — wraps macOS APIs Apple doesn't ship as CLIs
+- **`mcp/claude-remote-audio/patches/`** (planned) — carries roc-toolkit patches against a pinned master SHA
+
+Extension of *Ideal state over backwards compat*: "fix the source" includes upstream libraries. "The source" might be a fork, multiple forks combined, or our own patches — whatever gets us to the right behavior fastest.
+
+### Layered architecture
+
+**Every unit lives in a layer; layers stack with dependencies pointing down.** Higher layers compose lower ones. The principle applies at design time (which layer is this new code's home?) and at fix time (which layer owns the symptom's cause?) — they're the same question asked at different moments.
+
+**Design-time placement.** Before writing, locate the layer. A Swift CLI wrapping a Core Audio framework belongs at the OS-adapter layer (planned — on `feat/claude-remote-audio-scaffold`), not inlined in the orchestrator. A regex validator shared by `click`, `hover`, and `wait_for_selector` belongs in `selenium_browser/validators.py` (returning the `CssSelector` `NewType` brand), not duplicated into each MCP tool. Once a unit has a clear home, its dependencies become obvious — and the higher-layer callers stay thin.
+
+**Maintenance-time fix placement.** When a symptom surfaces, trace it down. `roc-send` crashing on mono input is a symptom; the cause is libsox's missing channel negotiation (planned — on `feat/claude-remote-audio-scaffold`). Document which layer owns the cause; the ideal-state fix lives there even when a higher-layer band-aid ships first. `mcp/claude-remote-audio/README.md`'s workaround inventory (planned) makes this explicit — every entry names the *owner* and the *ideal-state fix* layer.
+
+**Missing-layer detection.** When the same concern duplicates across higher layers, a lower layer is missing. `_nfkc_casefold` duplicated between `orchestrator.py` and `bluetooth.py` (planned — on `feat/claude-remote-audio-scaffold`) with the comment *"if a third caller emerges, extract to a shared `unicode_match` module"* is the signal — that lower layer should exist. Two callsites is the signal to consider extraction; three makes it overdue. W8 and W14 both stem from "our dispatch shape is shell-script-as-message" — one cause, two symptoms across the orchestrator, retired together by a typed-RPC layer.
+
+**Unfixable lower layers get an adapter, not pollution.** When the cause is upstream and unmovable — AirPods BT codec quirks, macOS Continuity steal, TCC's responsible-app chain — wrap the foundation in a detect-and-recover adapter at the lowest layer we own. Don't scatter the workaround across the orchestrator.
 
 ### Exception Handling
 
@@ -126,6 +156,8 @@ def handle_session_end(session_id: str):
 1. You've **actually seen** the exception occur in practice
 2. The exception is **expected as part of normal flow** (e.g., file existence checks)
 3. The library documentation **explicitly requires** handling specific exceptions
+
+**No anticipatory handlers** — if you haven't seen the exception in practice, don't write a handler for it. Pre-designing responses commits to a specific fix before knowing what's actually broken. Let unobserved failures bubble; when they happen, design the response against the real failure mode rather than the imagined one. This mirrors the *NewType validation barriers* rule below ("Don't NewType against a hypothetical bug class") — the bar is a *real* caller hitting a *known* failure, not a future-self speculation.
 
 **Don't duplicate your infrastructure** — If a decorator, context manager, or handler already covers an error path, the decorated function should not re-handle it. Inline error handling that duplicates infrastructure behavior is a semantic DRY violation and separation of concerns violation simultaneously:
 
@@ -165,6 +197,8 @@ Empirical testing — running the system against real conditions — is the prim
 - **Third-party library validation.** Testing the library's behavior, not ours.
 
 The asymmetry: a regression test specifically prevents re-introduction of a real failure mode (high value); a happy-path test re-proves what every empirical run already proves (low value, maintenance cost).
+
+See [`claude-docs/empirical-verification.md`](claude-docs/empirical-verification.md) for the verification loop, techniques, and lexicon; [`claude-docs/agentic-workflows.md`](claude-docs/agentic-workflows.md) for orchestrating multi-agent work (bake-offs, map→judge phasing).
 
 ## Python Specifics
 
@@ -307,6 +341,12 @@ def _validate_path(path: Path) -> None:
     ...
 ```
 
+**`__all__` declares what *other modules import* — not an entry point.** A `__all__` that just
+lists `main` is cargo-cult: a hook or standalone script run via `if __name__ == '__main__'` is
+*executed*, never imported, so it has nothing to declare. Keep `__all__` when a module exposes
+symbols others import — even one that *also* runs as a script (e.g. `linters/_lib/pickle_probe.py`
+is a subprocess yet exports `ProbeOutput`/`ProbeResult`).
+
 ### Immutable Types in Annotations
 
 **Prefer immutable types in function signatures and class definitions** to signal that values shouldn't be mutated:
@@ -389,7 +429,9 @@ class Database(BaseModel):
 
 ### Scripting
 
-Use `uv run --no-project -` with heredoc + PEP 723 inline dependencies:
+Generally prefer heredoc execution over throwaway script files for interactive work or analysis.
+
+**Python** — `uv run --no-project -` with heredoc + PEP 723 inline dependencies:
 
 ```bash
 uv run --no-project - <<'PY'
@@ -402,6 +444,15 @@ uv run --no-project - <<'PY'
 import pandas as pd
 print("Hello!")
 PY
+```
+
+**JS/TS** — `bun run -` with heredoc:
+
+```bash
+bun run - <<'JS'
+import chalk from "chalk";
+console.log(chalk.green("hi"));
+JS
 ```
 
 ## Tooling & Workflow
@@ -443,6 +494,8 @@ Run pre-commit hooks before committing to catch linting/formatting issues:
 ```bash
 uv run pre-commit run --all-files || uv run pre-commit run --all-files
 ```
+
+Most hooks run via `uv`; one needs a system binary — [`pinact`](https://github.com/suzuki-shunsuke/pinact) (the GitHub Actions SHA-pinning hook): `brew install pinact`.
 
 The `||` retry handles auto-fixers (ruff format, trailing whitespace) that modify files on the first run. The second run verifies clean. If the second run fails, it's a real error.
 
@@ -541,8 +594,10 @@ Lists of comparable entries are alphabetically sorted unless there's a semantic 
 
 ```
 /Users/chris/claude-workspace/
-├── .claude/                    # Claude Code configuration
-│   └── settings.local.json     # Hook and permission settings
+├── .claude/                    # Project Claude Code config (tracked; settings.local.json is gitignored)
+│   ├── settings.json           # Project settings
+│   ├── agents/                 # Project subagents
+│   └── skills/                 # Project skills — auto-discovered in this repo
 ├── hooks/                      # Claude Code hooks (SessionStart, SessionEnd, etc.)
 ├── mcp/                        # MCP servers (acronym, stays singular)
 │   ├── claude-session/
@@ -556,16 +611,18 @@ Lists of comparable entries are alphabetically sorted unless there's a semantic 
 │       ├── session_tracker.py
 │       └── utils.py
 ├── commands/                   # Custom slash commands
-├── skills/                     # Auto-activating skills
+├── skills/                     # placeholder; real skills: .claude/skills/ (project), ~/.claude/skills/ (user)
 ├── configs/                    # Configuration templates
 └── claude-docs/                # Reference docs for Claude (not auto-loaded)
 ```
 
 Reference docs in `claude-docs/` are not auto-loaded into context. Read them when the task lands in their domain.
 
-| Topic           | Doc                               |
-|-----------------|-----------------------------------|
-| Installing apps | `claude-docs/app-installation.md` |
+| Topic                  | Doc                                     |
+|------------------------|-----------------------------------------|
+| Agentic workflows      | `claude-docs/agentic-workflows.md`      |
+| Empirical verification | `claude-docs/empirical-verification.md` |
+| Installing apps        | `claude-docs/app-installation.md`       |
 
 ## Architecture
 

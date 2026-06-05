@@ -204,7 +204,7 @@
       <find>- Different log format showing more detailed metadata
   - Capture process started mid-sequence at request #23
 
-  I'll definitely recommend re-capturing with the new script. The improvements ensure a clean, consistent capture process with better reliability and logging. Starting from request #1 will provide a more comprehensive and structured dataset, 
+  I'll definitely recommend re-capturing with the new script. The improvements ensure a clean, consistent capture process with better reliability and logging. Starting from request #1 will provide a more comprehensive and structured dataset,
   addressing potential inconsistencies in the previous capture method.
 
   The key motivations are comprehensive logging, thread safety, and a</find>
@@ -261,7 +261,7 @@
   ☐ Phase 7: Perplexity architecture review
 
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-&gt; `` 
+&gt; ``
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   mitmdump -p 8080 -s scripts/intercept_t… (running)</find>
       <find>PermissiveModel</find>

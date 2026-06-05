@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar, TypeVar, cast
@@ -75,7 +75,6 @@ from .models import (
     ProfileStateOriginStorage,
     ProxyConfig,
     RequestTiming,
-    ResizeWindowResult,
     SaveProfileStateResult,
     ScrollBehavior,
     ScrollDirection,
@@ -87,6 +86,7 @@ from .models import (
     TTFBMetric,
     WaitForSelectorResult,
     WaitForSelectorState,
+    WindowSize,
 )
 from .scripts import (
     ARIA_SNAPSHOT_SCRIPT,
@@ -96,6 +96,7 @@ from .scripts import (
     INDEXEDDB_RESTORE_SCRIPT,
     NETWORK_MONITOR_CHECK_SCRIPT,
     NETWORK_MONITOR_SETUP_SCRIPT,
+    REQUEST_LOG_INSTALL_SCRIPT,
     RESOURCE_TIMING_SCRIPT,
     RESPONSE_BODY_CAPTURE_SCRIPT,
     TEXT_EXTRACTION_SCRIPT,
@@ -143,12 +144,15 @@ class BrowserService:
         self.state.restored_origins.clear()
         # Reset response body capture state - new browser needs interceptor reinstalled
         self.state.response_body_capture_enabled = False
+        # Reset request log install state - new browser needs interceptor reinstalled
+        self.state.request_log_installed = False
 
     async def get_browser(
         self,
         enable_har_capture: bool = False,
         browser: Browser | None = None,
         user_data_dir: str | None = None,
+        window_size: WindowSize | None = None,
     ) -> webdriver.Chrome:
         """Initialize and return browser session (lazy singleton pattern).
 
@@ -158,6 +162,11 @@ class BrowserService:
                     the currently running browser, or "chromium" if none is running.
                     Use "chromium" to avoid AppleScript targeting conflicts when
                     your personal Chrome is running (different bundle ID).
+            window_size: Optional initial window dimensions. When provided, sets the
+                    --window-size Chrome flag and follows up with set_window_size()
+                    after CDP injection for reliability. When None, Chrome uses its
+                    native default. On macOS, OS may clamp width to ~500px minimum;
+                    actual size is reflected in NavigationResult.window_size.
             user_data_dir: Optional persistent profile directory. When provided,
                     the chosen browser uses this path as its --user-data-dir, so
                     cookies, localStorage, IndexedDB (including non-extractable
@@ -237,7 +246,8 @@ class BrowserService:
             logger.info('Using Chromium: %s', chromium_path)
 
         opts.add_argument('--disable-blink-features=AutomationControlled')
-        opts.add_argument('--window-size=1920,1080')
+        if window_size is not None:
+            opts.add_argument(f'--window-size={window_size.width},{window_size.height}')
         opts.add_experimental_option('excludeSwitches', ['enable-automation'])
         opts.add_experimental_option('useAutomationExtension', False)
         opts.add_experimental_option(
@@ -292,6 +302,16 @@ class BrowserService:
                 """,
             },
         )
+
+        # Explicit post-launch resize for reliability. The --window-size flag is
+        # advisory on some OSes (macOS may clamp on first paint); set_window_size
+        # gives a synchronous return point with a value we can read back.
+        if window_size is not None:
+            await asyncio.to_thread(
+                self.state.driver.set_window_size,
+                window_size.width,
+                window_size.height,
+            )
 
         return self.state.driver
 
@@ -580,23 +600,35 @@ class BrowserService:
 
     @tool_registry.register_tool
     async def download_resource(self, url: str, output_filename: str) -> DownloadResourceResult:
-        """Download specific resource using current browser session's cookies and headers.
+        """Download a resource using the current browser session's auth state.
 
-        Extracts User-Agent, cookies (with domain scoping), and Referer from the browser
-        session to build browser-realistic requests. Critical for sites with bot detection
-        or CDN hotlink protection — the CDN sees the request as coming from the same browser.
+        Headers are replayed from the page's own recent XHR/fetch traffic, so any
+        SPA HttpInterceptor injections (tenant scoping like `unitid`, market/feature
+        flags, CSRF tokens, traceparent, etc.) flow through automatically. Cookies
+        — including HttpOnly — come from the live Selenium session. Routes through
+        mitmproxy when proxy is configured.
 
-        PREREQUISITE: Call navigate() first to establish browser session.
-        Without prior navigation, still works but may encounter bot detection.
+        PREREQUISITE: Call navigate() first. The request log is populated at navigate
+        time; before that, the tool falls back to browser-realistic defaults
+        (User-Agent, Referer, Accept-Language, Sec-Fetch-Dest/Mode/Site).
 
         Args:
             url: Full URL to resource (http:// or https://) or file:// for local files.
             output_filename: Filename to save as (no path). Saved to screenshot temp dir.
 
         Returns:
-            {'path': '/tmp/.../file.js', 'size_bytes': 26703, 'content_type': '...', 'status': 200, 'url': '...'}
+            DownloadResourceResult with path, size_bytes, content_type, status, url.
 
         Errors: Raises ToolError if response status >= 400, network failure, or local file not found.
+
+        Known limitations:
+            - Service Workers intercept fetch/XHR in a separate scope; PWAs that
+              route API traffic through a SW will not populate the request log,
+              and replayed downloads will only carry browser-default headers.
+            - Per-request signature/HMAC/digest headers (AWS SigV4, `x-amz-*`,
+              `Content-MD5`, anything matching signature/hmac/digest) are stripped
+              from replay because they encode a specific request body and won't
+              validate on a different request.
         """
         if not url.startswith(('http://', 'https://', 'file://')):
             raise fastmcp.exceptions.ValidationError('URL must start with http://, https://, or file://')
@@ -1664,26 +1696,26 @@ class BrowserService:
         return result
 
     @tool_registry.register_tool
-    async def resize_window(self, width: int, height: int) -> ResizeWindowResult:
+    async def resize_window(self, window_size: WindowSize) -> WindowSize:
         """Resize the browser window to specified dimensions.
 
         Useful for responsive design testing and mobile simulation.
 
         Args:
-            width: Window width in pixels
-            height: Window height in pixels
+            window_size: Target window dimensions. Both width and height required
+                    (positive ints, validated by the WindowSize model).
 
         Returns:
-            Dict with actual width and height after resize
+            WindowSize with actual width and height after resize.
 
         Common presets:
-            - Mobile (iPhone SE): 375 x 667
-            - Tablet (iPad): 768 x 1024
-            - Desktop (1080p): 1920 x 1080
-            - Desktop (1440p): 2560 x 1440
+            - Mobile (iPhone SE): WindowSize(width=375, height=667)
+            - Tablet (iPad): WindowSize(width=768, height=1024)
+            - Desktop (1080p): WindowSize(width=1920, height=1080)
+            - Desktop (1440p): WindowSize(width=2560, height=1440)
 
         Example:
-            resize_window(375, 667)  # Mobile viewport
+            resize_window(WindowSize(width=375, height=667))  # Mobile viewport
             screenshot("mobile-view.png")
 
         Note:
@@ -1693,20 +1725,16 @@ class BrowserService:
         """
         driver = await self.get_browser()
 
-        # Validation: positive integers only
-        if width <= 0 or height <= 0:
-            raise ValueError(f'Width and height must be positive integers. Got: {width}x{height}')
+        logger.info('Resizing window to %sx%s', window_size.width, window_size.height)
 
-        logger.info('Resizing window to %sx%s', width, height)
-
-        await asyncio.to_thread(driver.set_window_size, width, height)
+        await asyncio.to_thread(driver.set_window_size, window_size.width, window_size.height)
 
         # Get actual size (may differ due to OS constraints)
         size = await asyncio.to_thread(driver.get_window_size)
 
         logger.info('Window resized to %sx%s', size['width'], size['height'])
 
-        return ResizeWindowResult(width=size['width'], height=size['height'])
+        return WindowSize(width=size['width'], height=size['height'])
 
     @tool_registry.register_tool
     async def capture_web_vitals(self, timeout_ms: int = 5000) -> CoreWebVitals:
@@ -2316,6 +2344,7 @@ class BrowserService:
         fresh_browser: bool = False,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
+        window_size: WindowSize | None = None,
         browser: Browser | None = None,
     ) -> NavigationResult:
         """Load a URL and establish browser session. Entry point for all browser automation.
@@ -2331,6 +2360,11 @@ class BrowserService:
             init_scripts: JavaScript code to run before every page load (requires fresh_browser=True).
                          Scripts persist for all navigations until next fresh_browser=True.
                          Use for API interceptors, environment patching.
+            window_size: Optional initial window dimensions (WindowSize(width=..., height=...)).
+                        Requires fresh_browser=True; raises ValidationError otherwise (use
+                        resize_window() to change size mid-session). On macOS, OS may clamp
+                        width to ~500px minimum; actual size is reflected in the returned
+                        NavigationResult.window_size.
             browser: Which browser to use - "chrome" or "chromium". Defaults to the currently
                     running browser, or "chromium" if none is running.
                     Use "chromium" to avoid AppleScript targeting conflicts when
@@ -2401,6 +2435,12 @@ class BrowserService:
                 'init_scripts requires fresh_browser=True (scripts must be registered before first navigation)',
             )
 
+        if window_size is not None and not fresh_browser:
+            raise fastmcp.exceptions.ValidationError(
+                'window_size requires fresh_browser=True (window size is set at browser init; '
+                'use resize_window() to change size mid-session)',
+            )
+
         logger.info(
             'Navigating to %s%s%s%s',
             url,
@@ -2412,7 +2452,11 @@ class BrowserService:
         if fresh_browser:
             await self.close_browser()
 
-        driver = await self.get_browser(enable_har_capture=enable_har_capture, browser=browser)
+        driver = await self.get_browser(
+            enable_har_capture=enable_har_capture,
+            browser=browser,
+            window_size=window_size,
+        )
 
         # Install user init scripts (after browser creation, before navigation)
         # Scripts registered here run on EVERY new document in this session
@@ -2427,6 +2471,10 @@ class BrowserService:
         # Install response body capture interceptor for HAR export
         # Must run BEFORE first navigation to capture all fetch/XHR responses
         await _install_response_body_capture_if_needed(driver, self, enable_har_capture, 'navigate')
+
+        # Install request log interceptor for download_resource header replay
+        # Must run BEFORE first navigation to observe SPA HttpInterceptor headers
+        await _install_request_log_if_needed(driver, self)
 
         # PRE-ACTION: Capture localStorage before navigating away
         # (CDP can't query departed origins - frame is gone after navigation)
@@ -2447,7 +2495,12 @@ class BrowserService:
         # The helper is idempotent and checks restored_origins to avoid double-restore.
         await _restore_pending_profile_state_for_current_origin(self, driver)
 
-        return NavigationResult(current_url=driver.current_url, title=driver.title)
+        actual_size = await asyncio.to_thread(driver.get_window_size)
+        return NavigationResult(
+            current_url=driver.current_url,
+            title=driver.title,
+            window_size=WindowSize(width=actual_size['width'], height=actual_size['height']),
+        )
 
     @tool_registry.register_tool
     async def navigate_with_profile_state(
@@ -2462,6 +2515,7 @@ class BrowserService:
         browser: Browser | None = None,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
+        window_size: WindowSize | None = None,
     ) -> NavigationResult:
         """Launch fresh browser with imported profile state and navigate.
 
@@ -2643,7 +2697,11 @@ class BrowserService:
         await self.close_browser()
 
         # Get browser with configuration
-        driver = await self.get_browser(enable_har_capture=enable_har_capture, browser=browser)
+        driver = await self.get_browser(
+            enable_har_capture=enable_har_capture,
+            browser=browser,
+            window_size=window_size,
+        )
 
         # Build and register storage init script for localStorage/sessionStorage
         # This runs BEFORE page JavaScript on every new document (Playwright-style)
@@ -2683,6 +2741,9 @@ class BrowserService:
             'navigate_with_profile_state',
         )
 
+        # Install request log interceptor for download_resource header replay
+        await _install_request_log_if_needed(driver, self)
+
         # Inject cookies via CDP BEFORE navigation
         cookies_injected = await _inject_cookies_via_cdp(driver, profile_state.cookies)
 
@@ -2706,10 +2767,12 @@ class BrowserService:
         # Restore storage for current origin immediately
         await _restore_pending_profile_state_for_current_origin(self, driver)
 
+        actual_size = await asyncio.to_thread(driver.get_window_size)
         return NavigationResult(
             current_url=driver.current_url,
             title=driver.title,
             elapsed_seconds=round(timer.elapsed(), 3),
+            window_size=WindowSize(width=actual_size['width'], height=actual_size['height']),
         )
 
     @tool_registry.register_tool
@@ -2720,6 +2783,7 @@ class BrowserService:
         browser: Browser | None = None,
         enable_har_capture: bool = False,
         init_scripts: Sequence[str] | None = None,
+        window_size: WindowSize | None = None,
     ) -> NavigationResult:
         """Launch fresh browser using a persistent --user-data-dir and navigate.
 
@@ -2783,6 +2847,7 @@ class BrowserService:
             enable_har_capture=enable_har_capture,
             browser=browser,
             user_data_dir=user_data_dir,
+            window_size=window_size,
         )
 
         # Install user init scripts (after browser creation, before navigation)
@@ -2802,6 +2867,9 @@ class BrowserService:
             'navigate_with_user_data_dir',
         )
 
+        # Install request log interceptor for download_resource header replay
+        await _install_request_log_if_needed(driver, self)
+
         # Navigate (blocking operation)
         await asyncio.to_thread(driver.get, url)
 
@@ -2811,10 +2879,12 @@ class BrowserService:
 
         logger.info('Successfully navigated to %s (tracked origins: %s)', final_url, len(self.state.origin_tracker))
 
+        actual_size = await asyncio.to_thread(driver.get_window_size)
         return NavigationResult(
             current_url=driver.current_url,
             title=driver.title,
             elapsed_seconds=round(timer.elapsed(), 3),
+            window_size=WindowSize(width=actual_size['width'], height=actual_size['height']),
         )
 
     @tool_registry.register_tool
@@ -3626,31 +3696,216 @@ async def _install_response_body_capture_if_needed(
         logger.info('Response body capture interceptor installed')
 
 
+async def _install_request_log_if_needed(driver: webdriver.Chrome, service: BrowserService) -> None:
+    """Install JS interceptor that records outgoing request headers for download replay.
+
+    Always installed at navigate time. download_resource uses the captured
+    request log to find headers the page would attach (tenant scoping, CSRF
+    tokens, SPA HttpInterceptor injections) and replays them on the outgoing
+    httpx call so the request looks identical to one the page would have made.
+
+    Idempotent — script is also self-guarded by window.__downloadRequestLogInstalled.
+    """
+    if service.state.request_log_installed:
+        return
+    await asyncio.to_thread(
+        driver.execute_cdp_cmd,
+        'Page.addScriptToEvaluateOnNewDocument',
+        {'source': REQUEST_LOG_INSTALL_SCRIPT},
+    )
+    service.state.request_log_installed = True
+    logger.info('Request log interceptor installed')
+
+
 # -- CDP and storage helpers (shared by BrowserService methods) --
+
+
+# Headers the browser/httpx will manage itself; never replay from the request log.
+# Includes Fetch-spec forbidden headers (Referer, Origin, Sec-*) — request_log.js
+# captures page-attempted setRequestHeader calls before the browser silently
+# drops them on the wire, so the captured value would otherwise leak into the
+# httpx call and override our computed defaults.
+_BROWSER_MANAGED_HEADERS: Set[str] = {
+    'host',
+    'connection',
+    'content-length',
+    'cookie',
+    'transfer-encoding',
+    'upgrade',
+    'expect',
+    'referer',
+    'origin',
+}
+
+# Sec-* family is forbidden per Fetch spec (Sec-Fetch-*, Sec-WebSocket-*,
+# Sec-CH-*). Browser sets these; page-attempted values that reach the log
+# shouldn't override our defaults.
+_FORBIDDEN_SEC_HEADER_PATTERN = re.compile(r'(?i)^sec-')
+
+# Per-request signature/digest patterns. Replaying these on a different request
+# either fails verification or, worse, silently authenticates a request we
+# didn't intend. AWS SigV4, GCS, body hashes, HMAC schemes, content digests.
+_SIGNATURE_HEADER_PATTERN = re.compile(
+    r'(?i)(^|-)(signature|hmac|digest)($|-)|^content-md5$|^x-amz-|^x-goog-',
+)
+
+# AWS SigV4, GCS HMAC, and Azure SharedKey carry the signature inside the
+# Authorization value, not as a separate header — so name-based stripping
+# misses them. Replaying these on a different URL fails verification (403
+# SignatureDoesNotMatch). Bearer/Basic/Token-style auth uses different
+# scheme prefixes and is safe to replay.
+_SIGNATURE_AUTH_SCHEME_PATTERN = re.compile(r'(?i)^(AWS4-HMAC|GOOG4-HMAC|SharedKey\s)')
+
+# Headers tied to the OUTGOING request's purpose, not the inbound replay.
+# - Accept: SPAs typically set `application/json` framework-wide; download_resource
+#   wants binary, and httpx's default `*/*` is the universally-safe value.
+# - Content-Type: describes a request body. download_resource does GET — no body,
+#   so this is meaningless at best and triggers strict-server rejections at worst.
+_RESPONSE_NEGOTIATION_HEADERS: Set[str] = {'accept', 'content-type'}
+
+# Headers that scope a request to a subset of the full resource (byte range,
+# ETag/timestamp precondition). Replaying these produces 206 Partial Content
+# or 304 Not Modified — neither is a full download, but both pass the
+# `status >= 400` check and would be written to disk and reported as success.
+# Strip from replay so download_resource always fetches the whole resource.
+_REQUEST_SCOPING_HEADERS: Set[str] = {
+    'range',
+    'if-match',
+    'if-none-match',
+    'if-modified-since',
+    'if-unmodified-since',
+    'if-range',
+}
+
+_DEFAULT_PORTS: Mapping[str, int] = {'http': 80, 'https': 443}
+
+
+def _canonicalize_url(url: str) -> tuple[str, str, str]:
+    """Return (scheme, netloc, path) with WHATWG-style URL normalization.
+
+    Mirrors what `new URL(url, base).href` does in request_log.js so origin/path
+    comparisons against the JS-normalized log entries don't silently miss on
+    superficial differences:
+      - hostname lowercased
+      - default ports (80/443 for http/https) stripped
+      - naked-origin path defaults to '/'
+    """
+    parsed = urlparse(url)
+    host = (parsed.hostname or '').lower()
+    port = parsed.port if parsed.port is not None and parsed.port != _DEFAULT_PORTS.get(parsed.scheme) else None
+    netloc = f'{host}:{port}' if port else host
+    path = parsed.path or '/'
+    return parsed.scheme, netloc, path
+
+
+async def _query_download_request_log(driver: webdriver.Chrome, target_url: str) -> Mapping[str, str]:
+    """Return headers from a recent page request that best matches `target_url`.
+
+    Match priority:
+      1. Same origin AND same path (query/fragment ignored) — most recent wins
+      2. Same origin only — most recent wins
+      3. No match — empty mapping
+
+    Stripped from replay: browser-managed (`_BROWSER_MANAGED_HEADERS`),
+    content-negotiation (`_RESPONSE_NEGOTIATION_HEADERS`), request-scoping
+    Range/If-* (`_REQUEST_SCOPING_HEADERS`), per-request signature name
+    patterns (`_SIGNATURE_HEADER_PATTERN`), the Sec-* forbidden family
+    (`_FORBIDDEN_SEC_HEADER_PATTERN`), and Authorization values that begin
+    with a per-request signing scheme (`_SIGNATURE_AUTH_SCHEME_PATTERN`).
+    """
+    target_scheme, target_netloc, target_path = _canonicalize_url(target_url)
+    target_origin = f'{target_scheme}://{target_netloc}'
+
+    entries = await asyncio.to_thread(
+        driver.execute_script,
+        'return window.__downloadRequestLog || [];',
+    )
+    if not entries:
+        return {}
+
+    same_path: Mapping[str, str] | None = None
+    same_origin: Mapping[str, str] | None = None
+    # Iterate newest-first so the first hit at each tier wins.
+    for entry in reversed(entries):
+        entry_url = entry.get('url', '')
+        if not entry_url:
+            continue
+        entry_scheme, entry_netloc, entry_path = _canonicalize_url(entry_url)
+        if f'{entry_scheme}://{entry_netloc}' != target_origin:
+            continue
+        headers = entry.get('headers') or {}
+        # Skip entries with no page-set headers (vanilla fetch() with no init,
+        # analytics beacons, image preloads) — locking onto them would mask
+        # older rich-header entries from SPA HttpInterceptors and silently
+        # regress replay to bare defaults.
+        if not headers:
+            continue
+        if same_origin is None:
+            same_origin = headers
+        if entry_path == target_path:
+            same_path = headers
+            break
+
+    raw = same_path if same_path is not None else (same_origin or {})
+
+    return {
+        name: value
+        for name, value in raw.items()
+        if name.lower() not in _BROWSER_MANAGED_HEADERS
+        and name.lower() not in _RESPONSE_NEGOTIATION_HEADERS
+        and name.lower() not in _REQUEST_SCOPING_HEADERS
+        and not _SIGNATURE_HEADER_PATTERN.search(name)
+        and not _FORBIDDEN_SEC_HEADER_PATTERN.match(name)
+        and not (name.lower() == 'authorization' and _SIGNATURE_AUTH_SCHEME_PATTERN.match(value))
+    }
 
 
 async def _download_with_browser_context(
     service: BrowserService, driver: webdriver.Chrome, url: str
 ) -> tuple[bytes, int, str]:
-    """Download a URL using httpx with headers and cookies extracted from the browser session.
+    """Download a URL via httpx, replaying headers from the page's own recent requests.
 
-    Builds browser-realistic request headers (User-Agent, Referer, Sec-Fetch-*) and
-    forwards domain-scoped cookies so CDNs see the request as coming from the same
-    browser. Routes through mitmproxy when proxy is configured.
+    Headers are sourced from `window.__downloadRequestLog` (installed at navigate
+    time) — whatever the page's HttpClient sent on its last matching request flows
+    through here, including SPA HttpInterceptor injections (tenant scoping, CSRF,
+    feature flags, traceparent). Browser-managed and per-request-signature headers
+    are filtered out.
+
+    Sec-Fetch-* and Referer are spec-forbidden in fetch/XHR
+    (https://fetch.spec.whatwg.org/#forbidden-header-name), so the page can never
+    set them and they can never appear in the replay log. We add browser-realistic
+    defaults for them here so anti-bot layers (Cloudflare, Datadome) see a complete
+    request shape. Replay still wins for anything the page actually sets explicitly.
+
+    Cookies (including HttpOnly) flow via `driver.get_cookies()`. Routes through
+    mitmproxy when proxy is configured.
     """
-    user_agent = await asyncio.to_thread(driver.execute_script, 'return navigator.userAgent')
+    replayed = dict(await _query_download_request_log(driver, url))
     current_url = await asyncio.to_thread(lambda: driver.current_url)
 
-    headers = {
-        'User-Agent': user_agent,
-        'Accept': '*/*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Referer': current_url,
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'no-cors',
-        'Sec-Fetch-Site': 'cross-site',
+    target_scheme, target_netloc, _ = _canonicalize_url(url)
+    page_scheme, page_netloc, _ = _canonicalize_url(current_url)
+    sec_fetch_site = 'same-origin' if target_scheme == page_scheme and target_netloc == page_netloc else 'cross-site'
+
+    # Lowercase keys throughout — request_log.js stores captured headers
+    # lowercase, so mixing cases here would let two same-semantic keys
+    # (e.g., `Accept-Language` from defaults + `accept-language` from replay)
+    # land in the merged dict as separate entries and ship as duplicate
+    # headers on the wire.
+    defaults: dict[str, str] = {
+        'accept-language': 'en-US,en;q=0.9',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': sec_fetch_site,
+        'referer': current_url,
     }
+    if 'user-agent' not in replayed:
+        defaults['user-agent'] = await asyncio.to_thread(
+            driver.execute_script,
+            'return navigator.userAgent',
+        )
+
+    headers = {**defaults, **replayed}
 
     selenium_cookies = await asyncio.to_thread(driver.get_cookies)
     jar = httpx.Cookies()

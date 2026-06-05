@@ -190,6 +190,124 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   the 1108-session corpus, and no `prompt` field in the binary's SendMessage
                   zod schema. (6) TeamCreateToolInput.agent_type (str | None) — assigned to
                   team lead at creation (e.g., 'team-lead').
+- Schema v0.2.35: Expanded ApiError.type and ApiErrorDetail.type literals to include
+                  'rate_limit_error' alongside the existing 'overloaded_error' — both the
+                  top-level ApiError.type (Claude Code 2.1.100+) and the nested
+                  ApiErrorDetail.type. HTTP 429 rate-limit responses populate both fields with
+                  'rate_limit_error', and the previous single-value Literal caused
+                  ApiErrorSystemRecord validation to fall through the
+                  ApiError | NetworkError | EmptyError union and land on BaseRecord (14
+                  union-cascade extra_forbidden errors per failing record). Empirically:
+                  108 outer + 108 inner 'rate_limit_error' occurrences across the local corpus;
+                  binary string verification confirmed 'rate_limit_error' in Claude Code 2.1.138.
+- Schema v0.2.36: Added HookCancelledAttachment for the 'hook_cancelled' attachment type emitted
+                  when a hook is aborted before completion (observed in JSONL on Stop-hook
+                  cancellation paths). Shape mirrors HookNonBlockingErrorAttachment minus the
+                  stdout/stderr/exitCode trio that an unfinished hook can't produce: type,
+                  hookName, toolUseID, hookEvent, command, durationMs (all required; 6/6 fields
+                  present across observed records). Without this variant the AttachmentRecord
+                  discriminated union rejects the record with union_tag_invalid, breaking
+                  save_current_session / clone / archive for any session containing a cancelled
+                  hook. Binary verification: 15 'hook_cancelled' occurrences in Claude Code 2.1.138,
+                  16 in 2.1.77, 0 in 1.0.50 (introduced pre-2.1.77; exact version not pinned).
+- Schema v0.2.37: Cluster fix surfaced when cloning a 2.1.156 session (clone crashed on the
+                  unmodeled `mode` record) — closed every gap in the 2.1.139-2.1.156 window
+                  (306 strict failures collapsed to 0 real schema gaps). New record/tool/attachment
+                  types: SessionModeRecord (`mode` session-resumption sidecar, Claude Code 2.1.69+;
+                  {type, mode, sessionId}; mode Literal['normal'], binary domain {normal, coordinator}
+                  via isCoordinatorMode(); v0.2.20 modeled its permission-mode/worktree-state siblings
+                  but missed this one); AgentsKilledSystemRecord (subtype=agents_killed, 2.1.139+, base
+                  envelope only); WorkflowKeywordRequestAttachment (2.1.153+) and UltrathinkEffortAttachment
+                  (2.1.139+), bare {type} markers; ScheduleWakeupToolInput (prompt/delaySeconds:int/reason).
+                  New CacheMissReason variant model_changed (server diagnostic, mirrors existing variants).
+                  New fields: claude-opus-4-8 in ModelId/_AllModelIds (2.1.154+); AssistantRecord.
+                  attributionMcpServer/attributionMcpTool (2.1.149+); UserRecord.interruptedMessageId
+                  (2.1.149+); TurnDurationSystemRecord.pendingBackgroundAgentCount (2.1.152+);
+                  SkillListingAttachment.names; OpenedFileInIdeAttachment.displayPath; TokenUsage.
+                  output_tokens_details (OutputTokensDetails.thinking_tokens, API passthrough);
+                  EmptyError.type=None accepts the bare {"type": null} api_error shape. Every field
+                  binary-verified or classified server-only-diagnostic per precedent; binary-only siblings
+                  (pendingWorkflowCount, attributionSnapshots) and the 'coordinator' mode value deferred
+                  per empirical-only modeling (no JSONL occurrences). Two ScheduleWakeup records carrying a
+                  string `delaySeconds` (model coercion misfire vs the binary's zod number contract) were
+                  data-patched, not accommodated. Added BridgeSessionRecord for the 'bridge-session'
+                  sidecar ({type, sessionId, bridgeSessionId, lastSequenceNum}) emitted by
+                  /remote-control bridge sessions — binary-confirmed, surfaced in JSONL once a live
+                  bridge session ran (deferred at first pass per empirical-only: zero JSONL then).
+                  Extended CLAUDE_CODE_MAX_VERSION to 2.1.156.
+- Schema v0.2.38: Cross-machine gaps for Claude Code 2.1.157 — 8 modeled, 1 data-cleaned. forkedFrom:
+                  ForkOrigin {sessionId, messageUuid} on BaseRecord — a session-fork backpointer
+                  present on every record of a forked session (Claude Code 2.1.8+, binary-bisected).
+                  MonitorToolInput timeout_ms/persistent
+                  -> optional (binary: only description/command required). HookInfo.durationMs -> optional
+                  (absent on pre-2.1.120 records; reverse of v0.2.31). ScheduledTaskFireSystemRecord +=
+                  teamName/agentName (missed when v0.2.15 added them to all record types). SendMessage:
+                  control bodies (SendMessageControl = shutdown_request | shutdown_response, discriminated)
+                  widen SendMessageToolInput.message to str|control and type; SendMessageLegacyToolInput
+                  for the 2.1.63 pre-refactor {type, recipient, content} shape. CompactMetadata.
+                  preservedMessages (PreservedCompactMessages {anchorUuid, uuids, allUuids}).
+                  ImageSource.media_type widened to the Anthropic 4-value enum (+image/gif, image/webp).
+                  TurnDurationSystemRecord.pendingWorkflowCount — the binary-only sibling v0.2.37 deferred,
+                  now observable once workflows ran. The lone misfire (a SendMessage {to, prompt}
+                  hallucination, the shape v0.2.34 already removed) was data-cleaned, not modeled.
+                  Extended CLAUDE_CODE_MAX_VERSION to 2.1.157.
+- Schema v0.2.39: Workflow tool support + the session-nested workflow layout. SendMessageToolInput
+                  content optional and request_id/approve added (the plan-approval / shutdown reply
+                  fields the harness flattens onto the tool input). WorkflowToolInput (script?,
+                  2.1.146+) and RemoteTriggerToolInput (action, 2.1.81+). WorkflowJournalRecord
+                  (started | result, discriminated) + validate_journal_record for the run-journal
+                  artifact (subagents/workflows/wf_<runId>/journal.jsonl), a distinct stream from the
+                  session transcript. Agent recognition widened to Claude Code's affix-only rule
+                  (agent-*.jsonl / .meta.json carry an opaque id; the typed-id type slug is cosmetic).
+                  Operation support (archive format 2.4): the workflow-nested layout — workflow
+                  agents, their .meta.json sidecars, run-journals, and the sibling <session>/workflows/
+                  run metadata + scripts — now round-trips through clone/move/restore/archive/delete
+                  with agentId / sessionId / scriptPath remap. session-memory tombstoned (removed
+                  upstream ~2.1.128). Extended CLAUDE_CODE_MAX_VERSION to 2.1.159.
+- Schema v0.2.40: Cross-machine tool/record gaps + Claude Code 2.1.160, all binary-confirmed.
+                  BaseRecord.sessionKind (Literal['bg'] | None) — session origin kind from
+                  CLAUDE_CODE_SESSION_KIND; interactive sessions omit it, only 'bg' observed in JSONL
+                  (binary enum interactive|bg|daemon|daemon-worker). On BaseRecord, so it also resolves
+                  a union-cascade across system records (its absence bounced them to BaseRecord).
+                  WorktreeSessionData.worktreeBranch -> optional (absent when EnterWorktree attaches to
+                  an existing worktree — no branch created). StructuredOutputToolInput for the Workflow
+                  structured-output built-in (binary inputSchema z.object({}).passthrough(); re-typed
+                  from the permissive fallback so it reads as a built-in rather than MCP).
+                  WorkflowToolInput gained name/args/scriptPath (saved-workflow and on-disk-script
+                  forms; args an arbitrary caller payload, typed pydantic.JsonValue). New
+                  SendUserFileToolInput (deliver files to the user in remote environments, 2.1.142+).
+                  TaskUpdateToolInput gained metadata. Genuine tool-input hallucinations were
+                  data-cleaned, not modeled: SendMessage prompt->message; Grep string-typed
+                  -n/-C/head_limit coerced to bool/int (the binary preprocesses strings but stores the
+                  pre-coercion shape); Monitor stray run_in_background; an empty SendUserFile. The
+                  2.1.159->2.1.160 release delta is record-surface-empty; watch item: DesignSync (new
+                  first-party built-in tool, binary-confirmed, not yet in JSONL — needs a typed input
+                  on first capture). Extended CLAUDE_CODE_MAX_VERSION to 2.1.160.
+- Schema v0.2.41: Claude Code 2.1.162. UserRecord.promptSource (Literal queued|sdk|system|typed —
+                  prompt origin, 2.1.161+). NetworkDownError + NetworkDownConnection: the network-down
+                  api_error variant ({message, formatted, connection{code,message,isSSLError},
+                  isNetworkDown, rateLimits}, 2.1.161), a fourth error-union member ahead of EmptyError.
+                  queued_command attachment gained origin (UserRecordOrigin, 2.1.157); its commandMode
+                  tightened to Literal plan|prompt|task-notification. WorkflowToolInput.resumeFromRunId.
+                  UserRecordOrigin.kind tightened to the binary origin-producer set (auto-continuation|
+                  channel|coordinator|peer|task-notification). Enum Literals now carry the full binary
+                  producer set, not only JSONL-observed values — strict validation trips on genuine
+                  post-binary drift, not on values the installed binary already emits. Extended
+                  CLAUDE_CODE_MAX_VERSION to 2.1.162.
+- Schema v0.2.42: Claude Code 2.1.163. Modeled the binary appendEntry record-type family the
+                  empirical-only policy had skipped, all binary-proven with dispatch branches:
+                  ForkContextRefRecord (subagent fork-context pointer; the stuck-session-delete
+                  blocker), TagRecord, AgentColorRecord, AgentSettingRecord, IsolationLatchRecord,
+                  SpeculationAcceptRecord, ContentReplacementRecord. Five sibling rT4 routing types
+                  (frame-link, marble-origami-{commit,snapshot,reset}, attribution-snapshot) left
+                  unmodeled — registered-but-unwired or dead code, no enumerable producer. Added
+                  RetryableHttpError + RateLimitInfo: the retryable-HTTP api_error variant (429
+                  rate_limit / 529 overloaded — status + requestId + the network-down envelope), a
+                  fifth error-union member. StopHookSummarySystemRecord.hookAdditionalContext
+                  (2.1.163). TaskStatusAttachment (background-execution status, distinct from the
+                  TaskCreate TODO system). SessionModeRecord.mode + IsolationLatchRecord.side gained
+                  'coordinator' (binary isCoordinatorMode projection; previously empirical-only-
+                  deferred). Extended CLAUDE_CODE_MAX_VERSION to 2.1.163.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -260,12 +378,15 @@ __all__ = [
     'CLAUDE_CODE_MAX_VERSION',
     'CLAUDE_CODE_MIN_VERSION',
     'SCHEMA_VERSION',
+    'AgentColorRecord',
     'AgentListingDeltaAttachment',
     'AgentNameRecord',
     'AgentOutputToolInput',
     'AgentProgressData',
+    'AgentSettingRecord',
     'AgentState',
     'AgentTeammateSpawnedResult',
+    'AgentsKilledSystemRecord',
     'AgentsRetrievalResult',
     'AiTitleRecord',
     'AlreadyReadFileAttachment',
@@ -290,10 +411,12 @@ __all__ = [
     'BashProgressData',
     'BashToolInput',
     'BashToolResult',
+    'BridgeSessionRecord',
     'BridgeStatusSystemRecord',
     'CacheCreation',
     'CacheMissReason',
     'CacheMissReasonMessagesChanged',
+    'CacheMissReasonModelChanged',
     'CacheMissReasonParamsChanged',
     'CacheMissReasonPreviousMessageNotFound',
     'CacheMissReasonSystemChanged',
@@ -306,6 +429,8 @@ __all__ = [
     'CompactMetadata',
     'CompanionIntroAttachment',
     'ConnectionError',
+    'ContentReplacement',
+    'ContentReplacementRecord',
     'ContextManagement',
     'CronCreateToolInput',
     'CronCreateToolResult',
@@ -342,6 +467,8 @@ __all__ = [
     'FileHistorySnapshot',
     'FileHistorySnapshotRecord',
     'FileInfo',
+    'ForkContextRefRecord',
+    'ForkOrigin',
     'GlobToolInput',
     'GlobToolResult',
     'GrepToolInput',
@@ -350,6 +477,7 @@ __all__ = [
     'HookAdditionalContextAttachment',
     'HookBlockingErrorAttachment',
     'HookBlockingErrorData',
+    'HookCancelledAttachment',
     'HookInfo',
     'HookNonBlockingErrorAttachment',
     'HookProgressData',
@@ -361,6 +489,7 @@ __all__ = [
     'InformationalSystemRecord',
     'InvokedSkill',
     'InvokedSkillsAttachment',
+    'IsolationLatchRecord',
     'KillShellMessageResult',
     'KillShellToolInput',
     'KillShellToolResult',
@@ -374,7 +503,6 @@ __all__ = [
     'MCPStructuredContent',
     'MCPToolInput',
     'MCPToolResult',
-    'MalformedWriteToolInput',
     'McpInstructionsDeltaAttachment',
     'McpMeta',
     'McpMetaMetadata',
@@ -391,9 +519,12 @@ __all__ = [
     'MonitorToolInput',
     'NestedMemoryAttachment',
     'NestedMemoryContent',
+    'NetworkDownConnection',
+    'NetworkDownError',
     'NetworkError',
     'NotebookEditToolInput',
     'OpenedFileInIdeAttachment',
+    'OutputTokensDetails',
     'PatchHunk',
     'PdfFileInfo',
     'PermissionModeRecord',
@@ -402,6 +533,7 @@ __all__ = [
     'PlanModeExitAttachment',
     'PlanModeReentryAttachment',
     'PrLinkRecord',
+    'PreservedCompactMessages',
     'PreservedCompactSegment',
     'ProgressData',
     'ProgressRecord',
@@ -412,6 +544,7 @@ __all__ = [
     'QuestionOption',
     'QueueOperationRecord',
     'QueuedCommandAttachment',
+    'RateLimitInfo',
     'ReadFileUnchangedFileInfo',
     'ReadFileUnchangedToolResult',
     'ReadImageToolResult',
@@ -422,29 +555,41 @@ __all__ = [
     'ReadPdfToolResult',
     'ReadTextToolResult',
     'ReadToolInput',
+    'RemoteTriggerToolInput',
+    'RetryableHttpError',
     'SavedHookContextRecord',
+    'ScheduleWakeupToolInput',
     'ScheduledTaskFireSystemRecord',
     'SearchResultsReceivedData',
     'SelectedLinesInIdeAttachment',
+    'SendMessageControl',
+    'SendMessageLegacyToolInput',
     'SendMessageRouting',
+    'SendMessageShutdownRequest',
+    'SendMessageShutdownResponse',
     'SendMessageSimpleToolInput',
     'SendMessageToolInput',
     'SendMessageToolResult',
+    'SendUserFileToolInput',
     'ServerToolUse',
     'SessionAnalysis',
     'SessionMetadata',
+    'SessionModeRecord',
     'SessionRecord',
     'SessionRecordAdapter',
     'SimpleThinkingMetadata',
     'SkillListingAttachment',
     'SkillToolInput',
     'SkillToolResult',
+    'SpeculationAcceptRecord',
     'StatusChange',
     'StopHookSummarySystemRecord',
     'StrictModel',
+    'StructuredOutputToolInput',
     'SummaryRecord',
     'SystemRecord',
     'SystemSubtypeRecord',
+    'TagRecord',
     'Task',
     'TaskCreateToolInput',
     'TaskGetItem',
@@ -458,6 +603,7 @@ __all__ = [
     'TaskReminderItem',
     'TaskSingleItem',
     'TaskSingleToolResult',
+    'TaskStatusAttachment',
     'TaskStopToolResult',
     'TaskToolInput',
     'TaskToolResult',
@@ -483,6 +629,7 @@ __all__ = [
     'ToolUseCaller',
     'ToolUseContent',
     'TurnDurationSystemRecord',
+    'UltrathinkEffortAttachment',
     'UsageIteration',
     'UserQuestion',
     'UserRecord',
@@ -495,19 +642,25 @@ __all__ = [
     'WebSearchResultWrapper',
     'WebSearchToolInput',
     'WebSearchToolResult',
+    'WorkflowJournalRecord',
+    'WorkflowJournalResult',
+    'WorkflowJournalStarted',
+    'WorkflowKeywordRequestAttachment',
+    'WorkflowToolInput',
     'WorktreeSessionData',
     'WorktreeStateRecord',
     'WriteToolInput',
     'WriteToolResult',
+    'validate_journal_record',
     'validate_session_record',
     'validated_copy',
 ]
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.34'
+SCHEMA_VERSION = '0.2.42'
 CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
-CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.138')
+CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.163')
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -564,55 +717,6 @@ class WriteToolInput(StrictModel):
     content: str
 
 
-class MalformedWriteToolInput(StrictModel):
-    """Malformed Write tool input from historical JSON serialization bug.
-
-    CONTEXT:
-    This model exists to handle exactly 2 session records from December 24, 2025
-    (Claude Code version 2.0.76) where a JSON serialization bug caused malformed
-    tool_use inputs to be recorded in session files.
-
-    WHAT HAPPENED:
-    The model was writing a markdown file documenting Claude-in-Chrome MCP tool
-    invocation patterns. The markdown content contained example XML showing how
-    to invoke tools, including syntax like:
-
-        <parameter name="param1">value1","param2":"value2"}}]
-
-    Something in the serialization chain incorrectly parsed this content. The
-    `param2` substring within the content string was extracted as an actual
-    tool parameter, producing a malformed tool_use input like:
-
-        {"file_path": "...", "content": "...<truncated>...", "param2": "value2"}}]..."}
-
-    OUTCOME:
-    Claude Code's input validation correctly rejected these tool calls with:
-        InputValidationError: An unexpected parameter `param2` was provided
-
-    The writes never executed - the session files contain records of rejected
-    attempts, not successful operations.
-
-    WHY WE MODEL THIS:
-    Our Pydantic models validate session records (what was attempted), not tool
-    execution success. The malformed tool_use attempts exist in the session files
-    and need a matching model to pass validation.
-
-    EVIDENCE:
-    See fixtures/edge_cases/malformed_write_param2.jsonl for sanitized reproduction
-    records. This fixture contains the actual malformed records (paths sanitized)
-    and is validated by tests/test_fixtures.py.
-
-    FUTURE:
-    If Anthropic fixes the serialization bug and cleans up historical session
-    files, this model can be removed. The bug appears fixed in later versions
-    (no occurrences after December 2025).
-    """
-
-    file_path: PathField
-    content: str
-    param2: str  # The malformed field - always present in affected records
-
-
 class EditToolInput(StrictModel):
     """Input for Edit tool."""
 
@@ -652,9 +756,11 @@ class MonitorToolInput(StrictModel):
     """Input for Monitor tool - streams events from a long-running background script (Claude Code 2.1.98+)."""
 
     description: str  # Short human-readable description of what is being monitored
-    timeout_ms: int  # Kill deadline in milliseconds
-    persistent: bool  # If True, runs for the lifetime of the session (ignores timeout_ms)
     command: str  # Shell command or script to run
+    timeout_ms: int | None = None  # Kill deadline in ms; omitted when persistent=True (binary: optional, min 1000)
+    persistent: bool | None = (
+        None  # Runs for the session lifetime, ignoring timeout_ms (binary: optional, default false)
+    )
 
 
 class PushNotificationToolInput(StrictModel):
@@ -810,20 +916,47 @@ class TeamCreateToolInput(StrictModel):
 # -- SendMessage Tool Input (Claude Code 2.1.63+) ------------------------------
 
 
+class SendMessageShutdownRequest(StrictModel):
+    """Control-message body requesting a teammate shut down."""
+
+    type: Literal['shutdown_request']
+    reason: str | None = None
+
+
+class SendMessageShutdownResponse(StrictModel):
+    """Control-message body answering a shutdown request."""
+
+    type: Literal['shutdown_response']
+    request_id: str
+    approve: bool
+    reason: str | None = None
+
+
+SendMessageControl = Annotated[
+    SendMessageShutdownRequest | SendMessageShutdownResponse,
+    pydantic.Field(discriminator='type'),
+]
+
+
 class SendMessageToolInput(StrictModel):
     """Input for SendMessage tool — post-backfill wire shape.
 
-    Claude Code's `backfillObservableInput` derives `type`/`recipient`/`content` from
-    `to`/`message` before serialization, so the recorded shape carries all six fields
-    when `type=='message'`. The raw two-field form is captured by SendMessageSimpleToolInput.
+    Claude Code's `backfillObservableInput` derives top-level fields from `to`/`message`.
+    For an object `message` (control body): `type` = message.type, `recipient` = to (always),
+    `request_id`/`approve` are copied up iff present, and `content` = `message.reason ?? message.feedback`
+    (so `content` is absent when the control body carries neither). `reason`/`feedback` never appear as
+    top-level keys. For a string `message`: `type='message'`, `recipient` = to, `content` = message.
+    The raw two-field form is SendMessageSimpleToolInput.
     """
 
     to: str
-    message: str
-    type: Literal['message']  # Backfilled from message.type
-    recipient: str  # Backfilled from to
-    content: str  # Backfilled from message
-    summary: str | None = None  # Binary: v.string().optional()
+    message: str | SendMessageControl
+    type: Literal['message', 'shutdown_request', 'shutdown_response']  # Mirrors message.type
+    recipient: str  # Backfilled from to (always)
+    content: str | None = None  # Backfilled: string message, or control reason/feedback; absent otherwise
+    summary: str | None = None  # Passthrough inputSchema field: v.string().optional()
+    request_id: str | None = None  # Backfilled from message.request_id (control _response bodies)
+    approve: bool | None = None  # Backfilled from message.approve (control _response bodies)
 
 
 class SendMessageSimpleToolInput(StrictModel):
@@ -831,6 +964,15 @@ class SendMessageSimpleToolInput(StrictModel):
 
     to: str
     message: str
+
+
+class SendMessageLegacyToolInput(StrictModel):
+    """Pre-refactor SendMessage wire shape (Claude Code 2.1.63): type/recipient/content, no to/message."""
+
+    type: Literal['message']
+    recipient: str
+    content: str
+    summary: str | None = None
 
 
 # -- TaskCreate Tool Input (Claude Code 2.1.17+) -------------------------------
@@ -866,6 +1008,7 @@ class TaskUpdateToolInput(StrictModel):
         description: New description for the task
         owner: Agent/worker name to assign the task to
         addBlockedBy: Task IDs that block this task
+        metadata: Arbitrary caller metadata; binary schema: v.record(v.string(), v.unknown()).optional()
     """
 
     taskId: str
@@ -876,6 +1019,9 @@ class TaskUpdateToolInput(StrictModel):
     owner: str | None = None
     addBlocks: Sequence[str] | None = None  # Task IDs that this task blocks
     addBlockedBy: Sequence[str] | None = None
+    metadata: Mapping[str, Any] | None = (
+        None  # strict_typing_linter.py: loose-typing — binary schema is v.record(v.string(), v.unknown()).optional()
+    )
 
 
 # -- TaskList Tool Input (Claude Code 2.1.17+) ---------------------------------
@@ -1029,6 +1175,62 @@ class CronListToolInput(StrictModel):
     """Input for CronList tool - lists scheduled cron jobs."""
 
 
+class ScheduleWakeupToolInput(StrictModel):
+    """Input for ScheduleWakeup tool - arms a /loop dynamic-mode wake heartbeat.
+
+    delaySeconds is the API contract type (zod number, clamped to [60, 3600]
+    by the runtime).
+    """
+
+    prompt: str
+    delaySeconds: int
+    reason: str
+
+
+# -- Workflow + RemoteTrigger Tool Inputs --------------------------------------
+
+
+class WorkflowToolInput(StrictModel):
+    """Input for the Workflow tool — multi-agent orchestration (Claude Code 2.1.146+).
+
+    Binary inputSchema: {script?, name?, scriptPath?, resumeFromRunId?, args?,
+    description?, title?} — all optional (a refine requires one of script/name/scriptPath).
+    The inline-script (`script`), on-disk-script (`scriptPath`), and saved-workflow (`name` + `args`)
+    forms all appear in observed data; description/title remain binary-only and unmodeled.
+    `args` is an arbitrary caller-supplied JSON value passed verbatim to the run.
+    """
+
+    script: str | None = None
+    name: str | None = None  # Saved-workflow name (the name+args form runs a registered workflow)
+    args: pydantic.JsonValue | None = None  # Arbitrary caller-supplied input exposed to the workflow as `args`
+    scriptPath: str | None = None  # Path to a persisted workflow script on disk; takes precedence over script/name
+    resumeFromRunId: str | None = None  # Resume a prior workflow run by id; completed agents replay cached results
+
+
+class RemoteTriggerToolInput(StrictModel):
+    """Input for the RemoteTrigger tool — claude.ai routines API (Claude Code 2.1.81+).
+
+    Binary inputSchema: {action: enum[list|get|create|update|run] (required),
+    trigger_id?, body?}. Only `action` appears in observed session data
+    (`{"action": "list"}`), so it alone is modeled.
+    """
+
+    action: Literal['list', 'get', 'create', 'update', 'run']
+
+
+class SendUserFileToolInput(StrictModel):
+    """Input for the SendUserFile tool — delivers files to the user (Claude Code 2.1.142+).
+
+    Binary inputSchema: {files: array(string).min(1) (required), status: enum[normal|proactive]
+    (required), caption?}. Surfaces artifacts (screenshots, reports) — `proactive` pushes
+    unprompted, `normal` accompanies a reply.
+    """
+
+    files: Sequence[str]  # File paths (absolute or relative to cwd); binary requires >= 1
+    status: Literal['normal', 'proactive']
+    caption: str | None = None  # Optional short caption for the file(s)
+
+
 # -- ListMcpResourcesTool Input (5x occurrences) -------------------------------
 
 
@@ -1145,19 +1347,31 @@ class MCPToolInput(PermissiveModel):
     """
 
 
+class StructuredOutputToolInput(PermissiveModel):
+    """Input for the StructuredOutput built-in (Workflow structured output, 2.1.146+).
+
+    The tool's binary inputSchema is z.object({}).passthrough() — an arbitrary, caller-defined
+    payload (the workflow's per-call JSON Schema), so no fields are modeled. A distinct named type
+    (vs the MCP fallback) keeps the artifact observably a Claude Code built-in; ToolUseContent
+    re-types it from the permissive fallback — it is never matched directly, since MCPToolInput
+    catches first in the left-to-right union.
+    """
+
+
 # Union of tool inputs (typed models first, PermissiveModel fallback for MCP tools)
 # NOTE: Order matters! More specific (more required fields) should come first.
 # Models with no required fields must come last before fallback.
 ToolInput = Annotated[
     # Path-based tools (most specific - file_path + other required fields)
-    MalformedWriteToolInput  # file_path, content, param2 required - must be before WriteToolInput!
-    | WriteToolInput  # file_path, content required
+    WriteToolInput  # file_path, content required
     | EditToolInput  # file_path, old_string, new_string required
     | NotebookEditToolInput  # notebook_path, new_source required
     | ReadToolInput  # file_path required
     # Multi-field tools
     | SendMessageToolInput  # to, message, type, recipient, content required (backfilled wire shape)
     | SendMessageSimpleToolInput  # to, message required (2.1.81+)
+    | SendMessageLegacyToolInput  # type, recipient, content required; no to/message (2.1.63 pre-refactor)
+    | SendUserFileToolInput  # files, status required (2.1.142+)
     | TaskToolInput  # prompt, description, subagent_type required
     | TaskCreateToolInput  # subject, description required (2.1.17+)
     | TeamCreateToolInput  # team_name, description required (2.1.63+)
@@ -1179,7 +1393,9 @@ ToolInput = Annotated[
     | KillShellToolInput  # shell_id required
     | CronCreateToolInput  # cron, prompt required (2.1.71+)
     | CronDeleteToolInput  # id required (2.1.71+)
+    | ScheduleWakeupToolInput  # prompt, delaySeconds, reason required
     | SkillToolInput  # skill required
+    | RemoteTriggerToolInput  # action required (2.1.81+)
     # Optional-only fields (must be near end)
     | ExitPlanModeToolInput  # plan optional, launchSwarm optional
     | ListMcpResourcesToolInput  # server optional
@@ -1187,10 +1403,12 @@ ToolInput = Annotated[
     | ExitWorktreeToolInput  # action required (2.1.105+)
     | MonitorToolInput  # description, timeout_ms, persistent, command required (2.1.98+)
     | PushNotificationToolInput  # message, status required (2.1.110+)
+    | WorkflowToolInput  # script optional, no required fields (2.1.146+)
     | TaskListToolInput  # No fields (2.1.17+)
     | CronListToolInput  # No fields (2.1.71+)
     | EnterPlanModeToolInput  # No fields - must be last before fallback!
-    | MCPToolInput,  # Fallback for MCP tools (PermissiveModel for observability)
+    | MCPToolInput  # Fallback for MCP tools (PermissiveModel for observability)
+    | StructuredOutputToolInput,  # Open-schema built-in; never matched directly (MCP catches first), re-typed by ToolUseContent
     pydantic.Field(union_mode='left_to_right'),
 ]
 
@@ -1202,7 +1420,9 @@ class ImageSource(StrictModel):
     """Image source data for image content."""
 
     type: Literal['base64']
-    media_type: Literal['image/jpeg', 'image/png']  # Only value observed across all sessions
+    media_type: Literal[
+        'image/jpeg', 'image/png', 'image/gif', 'image/webp'
+    ]  # Anthropic image-source enum (binary-confirmed)
     data: str  # Base64 encoded image data
 
 
@@ -1260,6 +1480,11 @@ class ToolUseContent(StrictModel):
             # MCP tools are expected to use the fallback - they're third-party
             if tool_name.startswith('mcp__'):
                 return v
+
+            # StructuredOutput is a built-in whose input schema is intentionally open
+            # (z.object({}).passthrough() in the binary); re-type it from the permissive fallback.
+            if tool_name == 'StructuredOutput':
+                return StructuredOutputToolInput.model_validate(v.model_dump())
 
             # ANY Claude Code tool using fallback is a bug - either:
             # - New tool needs a model, OR
@@ -1342,6 +1567,19 @@ class CacheMissReasonMessagesChanged(StrictModel):
     cache_missed_input_tokens: int
 
 
+class CacheMissReasonModelChanged(StrictModel):
+    """Cache miss because the model changed mid-session.
+
+    Carries the count of input tokens that were not served from cache.
+    Server-emitted via the cache-diagnosis-2026-04-07 Anthropic API beta
+    header, not present in the client binary (consistent with the other
+    CacheMissReason variants).
+    """
+
+    type: Literal['model_changed']
+    cache_missed_input_tokens: int
+
+
 class CacheMissReasonParamsChanged(StrictModel):
     """Cache miss because request parameters changed.
 
@@ -1388,6 +1626,7 @@ CacheMissReason = Annotated[
     CacheMissReasonPreviousMessageNotFound
     | CacheMissReasonSystemChanged
     | CacheMissReasonMessagesChanged
+    | CacheMissReasonModelChanged
     | CacheMissReasonParamsChanged
     | CacheMissReasonToolsChanged
     | CacheMissReasonUnavailable,
@@ -1477,6 +1716,16 @@ class UsageIteration(StrictModel):
     type: Literal['message']
 
 
+class OutputTokensDetails(StrictModel):
+    """Output-token breakdown (Anthropic API usage passthrough).
+
+    Server-emitted in message.usage; not a client-binary literal (same
+    server-diagnostic precedent as CacheMissReason).
+    """
+
+    thinking_tokens: int
+
+
 class TokenUsage(StrictModel):
     """Token usage information for assistant messages."""
 
@@ -1491,6 +1740,7 @@ class TokenUsage(StrictModel):
     iterations: Sequence[UsageIteration] | None = None  # Internal inference iterations (Claude Code 2.1.100+)
     speed: Literal['standard', 'fast'] | None = None  # Speed tier (Claude Code 2.1.41+, 'fast' added 2.1.112+)
     research_preview_2026_02: str | None = None  # Research preview feature flag (e.g. 'active')
+    output_tokens_details: OutputTokensDetails | None = None  # Output-token breakdown (API passthrough)
 
 
 # -- Thinking Metadata ---------------------------------------------------------
@@ -1559,13 +1809,21 @@ class CompactMetadata(StrictModel):
     postTokens: int | None = None  # Token count after compaction (Claude Code 2.1.100+)
     durationMs: int | None = None  # Compaction runtime in milliseconds (Claude Code 2.1.100+)
     preservedSegment: PreservedCompactSegment | None = None  # Anchor pointers preserved across compaction
+    preservedMessages: PreservedCompactMessages | None = (
+        None  # Preserved-message anchors (richer sibling of preservedSegment)
+    )
+
+
+class PreservedCompactMessages(StrictModel):
+    """Preserved-message anchors carried across a compaction."""
+
+    anchorUuid: str
+    uuids: Sequence[str]
+    allUuids: Sequence[str]
 
 
 class PreservedCompactSegment(StrictModel):
-    """Anchor UUIDs identifying the conversation segment preserved across an auto-compact.
-
-    Pydantic resolves the forward reference from CompactMetadata.preservedSegment.
-    """
+    """Anchor UUIDs identifying the conversation segment preserved across an auto-compact."""
 
     headUuid: str  # Earliest preserved record
     anchorUuid: str  # Anchor record within the preserved segment
@@ -1588,7 +1846,7 @@ class MicrocompactMetadata(StrictModel):
 class ApiErrorDetail(StrictModel):
     """Nested API error details."""
 
-    type: Literal['overloaded_error']  # Only value observed across all sessions
+    type: Literal['overloaded_error', 'rate_limit_error']
     message: str
 
 
@@ -1607,7 +1865,7 @@ class ApiError(StrictModel):
     headers: Mapping[str, str | Sequence[str]]
     requestID: str | None = None  # Can be null for some errors
     error: ApiErrorResponse | None = None  # Can be missing for some errors (e.g., 503)
-    type: Literal['overloaded_error'] | None = None  # Top-level error type (Claude Code 2.1.100+)
+    type: Literal['overloaded_error', 'rate_limit_error'] | None = None  # Top-level error type (Claude Code 2.1.100+)
 
 
 # noinspection PyShadowingBuiltins
@@ -1627,7 +1885,72 @@ class NetworkError(StrictModel):
 
 
 class EmptyError(StrictModel):
-    """Empty error object for unknown/unspecified API errors (Claude Code 2.0.76+)."""
+    """Unspecified API error object (Claude Code 2.0.76+).
+
+    Emitted either fields-less (``{}``) or as a bare ``{"type": null}`` -- a
+    network-error object whose ``cause`` was undefined at write time. The
+    optional null ``type`` mirrors ``NetworkError.type`` / ``ApiError.type``.
+    """
+
+    type: None = None  # Always null when present; mirrors NetworkError.type
+
+
+class NetworkDownConnection(StrictModel):
+    """Connection diagnostics for the network-down api_error variant (Claude Code 2.1.161+)."""
+
+    code: Literal['ConnectionRefused', 'ECONNRESET', 'FailedToOpenSocket']
+    message: str
+    isSSLError: bool
+
+
+class NetworkDownError(StrictModel):
+    """Network-down api_error variant (Claude Code 2.1.161+).
+
+    Distinct from ApiError (status/headers), NetworkError (cause), and EmptyError
+    (null-type-only): identified by required formatted + connection + isNetworkDown.
+    """
+
+    message: str
+    formatted: str
+    connection: NetworkDownConnection
+    isNetworkDown: bool
+    rateLimits: None = None  # null in this variant
+
+
+class RateLimitInfo(StrictModel):
+    """Rate-limit fields copied from the server ``anthropic-ratelimit-unified-*`` headers.
+
+    ``rateLimitType`` is a pass-through ``str``, NOT a Literal: the producer writes the raw
+    header value, so the set is server-defined, not binary-enumerated. The binary only
+    *consumes* a known subset (``five_hour``/``seven_day``/``seven_day_opus``/
+    ``seven_day_sonnet``) -- per the binary-proven gate, consumer checks don't gate, and a
+    Literal would reject server-added types the producer passes through. ``resetsAt`` is a
+    unix epoch from the ``-reset`` header.
+    """
+
+    rateLimitType: str | None = None
+    resetsAt: int | None = None
+
+
+class RetryableHttpError(StrictModel):
+    """Retryable HTTP api_error (429 rate_limit / 529 overloaded) with the network-diagnostic envelope.
+
+    The server responded with a retryable status, so this carries HTTP ``status`` +
+    ``requestId`` alongside the same ``formatted``/``connection``/``isNetworkDown``/
+    ``rateLimits`` envelope as NetworkDownError. Distinct from ApiError (``headers`` +
+    capital-D ``requestID``) and NetworkDownError (no ``status``; ``connection`` is an
+    object): identified by required ``status`` + the envelope. ``connection``/``rateLimits``
+    are null on a server-side HTTP error (the socket reached the server). Same binary error
+    reducer as NetworkDownError. Spans Claude Code 2.1.161+.
+    """
+
+    message: str
+    status: int
+    requestId: str | None = None  # H.requestID ?? undefined -- absent on some records
+    formatted: str
+    connection: NetworkDownConnection | None  # object on socket failures, null on HTTP errors
+    isNetworkDown: bool
+    rateLimits: RateLimitInfo | None  # parsed ratelimit headers, else null
 
 
 # -- MCP Metadata (Claude Code 2.1.19+) ----------------------------------------
@@ -2451,15 +2774,31 @@ class BaseRecord(StrictModel):
     uuid: str
     timestamp: str
     sessionId: str
+    forkedFrom: ForkOrigin | None = (
+        None  # Source session/message when this record belongs to a forked session (Claude Code 2.1.8+)
+    )
+    # Session origin kind; absent for interactive sessions (the omitted default). Binary enum is
+    # interactive|bg|daemon|daemon-worker (from CLAUDE_CODE_SESSION_KIND); only 'bg' observed in JSONL.
+    sessionKind: Literal['bg'] | None = None
+
+
+class ForkOrigin(StrictModel):
+    """Backpointer to the source session/message a forked session branched from."""
+
+    sessionId: str
+    messageUuid: str
 
 
 # -- User Record ---------------------------------------------------------------
 
 
 class UserRecordOrigin(StrictModel):
-    """Origin metadata for user records (Claude Code 2.1.87+)."""
+    """Origin metadata shared by UserRecord.origin and QueuedCommandAttachment.origin (2.1.87+).
 
-    kind: str  # e.g., "task-notification"
+    kind is the closed origin-producer set; 'human' is consumer-guard-only (no producer).
+    """
+
+    kind: Literal['auto-continuation', 'channel', 'coordinator', 'peer', 'task-notification']  # last updated 2.1.161
 
 
 class UserRecord(BaseRecord):
@@ -2538,9 +2877,19 @@ class UserRecord(BaseRecord):
         None, description='MCP tool structured content metadata (Claude Code 2.1.19+)'
     )
     promptId: str | None = pydantic.Field(None, description='Prompt identifier (Claude Code 2.1.74+)')
+    promptSource: Literal['queued', 'sdk', 'system', 'typed'] | None = pydantic.Field(
+        None,
+        description="Prompt origin (Claude Code 2.1.161+): non-interactive→'sdk', isMeta→'system', "
+        "queued-replay→'queued', else 'typed'.",
+    )
     entrypoint: str | None = pydantic.Field(None, description='Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)')
     teamName: str | None = pydantic.Field(None, description='Team name when running in multi-agent team mode')
     agentName: str | None = pydantic.Field(None, description='Agent name within team (may be absent for lead agent)')
+    interruptedMessageId: str | None = pydantic.Field(
+        None,
+        description='API message ID (msg_*) of the assistant message interrupted by this user '
+        'input (Claude Code 2.1.149+).',
+    )
 
 
 # -- Assistant Record ----------------------------------------------------------
@@ -2606,6 +2955,16 @@ class AssistantRecord(BaseRecord):
         None,
         description='Active plugin name (e.g., "codex"); paired with attributionSkill when '
         'the assistant turn is emitted by a plugin-installed skill (Claude Code 2.1.121+).',
+    )
+    attributionMcpServer: str | None = pydantic.Field(
+        None,
+        description='MCP server name attributed to an assistant turn that invoked an MCP tool '
+        '(e.g., "selenium-browser"); paired with attributionMcpTool (Claude Code 2.1.149+).',
+    )
+    attributionMcpTool: str | None = pydantic.Field(
+        None,
+        description='MCP tool name attributed to the turn (e.g., "navigate"); paired with '
+        'attributionMcpServer (Claude Code 2.1.149+).',
     )
 
 
@@ -2726,8 +3085,8 @@ class ApiErrorSystemRecord(BaseRecord):
     agentName: str | None = None
     cause: ConnectionError | None = None  # Connection error details (for network failures)
     error: (
-        ApiError | NetworkError | EmptyError
-    )  # API error, network error, or empty error (EmptyError must be last - no required fields)
+        ApiError | NetworkError | NetworkDownError | RetryableHttpError | EmptyError
+    )  # api/network/network-down/retryable-http/empty (EmptyError last — no required fields)
     retryInMs: float
     retryAttempt: int
     maxRetries: int
@@ -2763,6 +3122,10 @@ class TurnDurationSystemRecord(BaseRecord):
     subtype: Literal['turn_duration']
     durationMs: int  # Duration of the turn in milliseconds
     messageCount: int | None = None  # Number of messages in the turn (Claude Code 2.1.87+)
+    pendingBackgroundAgentCount: int | None = None  # Background agents still running at turn end (Claude Code 2.1.152+)
+    pendingWorkflowCount: int | None = (
+        None  # Workflows still running at turn end (sibling of pendingBackgroundAgentCount)
+    )
     isMeta: bool
     isSidechain: bool
     userType: str
@@ -2779,7 +3142,7 @@ class HookInfo(StrictModel):
     """Information about a hook execution."""
 
     command: str
-    durationMs: int  # Hook execution duration in milliseconds (Claude Code 2.1.120+)
+    durationMs: int | None = None  # Hook duration ms (Claude Code 2.1.120+; absent on pre-2.1.120 records)
 
 
 class StopHookSummarySystemRecord(BaseRecord):
@@ -2792,6 +3155,7 @@ class StopHookSummarySystemRecord(BaseRecord):
     hookCount: int
     hookInfos: Sequence[HookInfo]
     hookErrors: Sequence[str]  # Empty sequence observed so far
+    hookAdditionalContext: Sequence[str] | None = None  # Stop/SubagentStop additionalContext (2.1.163+)
     preventedContinuation: bool
     stopReason: str  # Can be empty string
     hasOutput: bool
@@ -2848,6 +3212,8 @@ class ScheduledTaskFireSystemRecord(BaseRecord):
     slug: str | None = None
     entrypoint: str | None = None
     agentId: str | None = None  # Present on sidechain subagent records (Claude Code 2.1.112+)
+    teamName: str | None = None
+    agentName: str | None = None
 
 
 class AwaySummarySystemRecord(BaseRecord):
@@ -2871,6 +3237,26 @@ class AwaySummarySystemRecord(BaseRecord):
     entrypoint: str | None = None
 
 
+class AgentsKilledSystemRecord(BaseRecord):
+    """System record emitted when running subagents are killed (subtype=agents_killed, Claude Code 2.1.139+).
+
+    Carries no payload beyond the base envelope; signals subagent termination
+    (e.g., on Esc / session interrupt).
+    """
+
+    type: Literal['system']
+    cwd: PathField
+    parentUuid: str | None
+    subtype: Literal['agents_killed']
+    isMeta: bool
+    isSidechain: bool
+    userType: str
+    version: CCVersionStrField
+    gitBranch: str
+    slug: str | None = None
+    entrypoint: str | None = None
+
+
 # Union of system subtype records
 SystemSubtypeRecord = Annotated[
     LocalCommandSystemRecord
@@ -2882,7 +3268,8 @@ SystemSubtypeRecord = Annotated[
     | StopHookSummarySystemRecord
     | BridgeStatusSystemRecord
     | ScheduledTaskFireSystemRecord
-    | AwaySummarySystemRecord,
+    | AwaySummarySystemRecord
+    | AgentsKilledSystemRecord,
     pydantic.Field(discriminator='subtype'),
 ]
 
@@ -3160,7 +3547,7 @@ class WorktreeSessionData(StrictModel):
     originalCwd: str
     worktreePath: str
     worktreeName: str
-    worktreeBranch: str
+    worktreeBranch: str | None = None  # Absent when entering an existing worktree — no branch created (2.1.105+)
     sessionId: str
     originalBranch: str | None = None  # Absent when entering existing worktree (2.1.105+)
     originalHeadCommit: str | None = None  # Absent when entering existing worktree (2.1.105+)
@@ -3190,6 +3577,166 @@ class PermissionModeRecord(StrictModel):
     type: Literal['permission-mode']
     permissionMode: Literal['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto']
     sessionId: str
+
+
+# -- Session Mode Record (Claude Code 2.1.69+) --------------------------------
+
+
+class SessionModeRecord(StrictModel):
+    """Records the active session mode for a session.
+
+    Resumption-state sidecar written alongside PermissionModeRecord; does NOT
+    inherit from BaseRecord -- minimal schema with no uuid/timestamp. Binary
+    ``$.push({type:"mode",mode:this.currentSessionMode,sessionId:q})`` where mode is
+    ``isCoordinatorMode() ? "coordinator" : "normal"`` (same projection as
+    IsolationLatchRecord.side).
+    """
+
+    type: Literal['mode']
+    mode: Literal['coordinator', 'normal']  # last updated ≤2.1.156
+    sessionId: str
+
+
+# -- Bridge Session Record -----------------------------------------------------
+
+
+class BridgeSessionRecord(StrictModel):
+    """Records the remote-control bridge association for a session.
+
+    Resumption-state sidecar (no uuid/timestamp), written alongside
+    PermissionModeRecord. Binary: ``$.push({type:"bridge-session",sessionId:q,
+    bridgeSessionId:...,lastSequenceNum:...})``; emitted by /remote-control
+    bridge sessions. Distinct from BridgeStatusSystemRecord (a system subtype).
+    """
+
+    type: Literal['bridge-session']
+    sessionId: str
+    bridgeSessionId: str
+    lastSequenceNum: int
+
+
+# -- Agent/session-state records (binary-proven; producers present since ≤2.1.156) -----
+#
+# Minimal records the binary writes via appendEntry/appendFile and re-emits on session-
+# file rotation (reAppendSessionMetadata). Each docstring cites its binary write site;
+# none carry the uuid/timestamp/cwd envelope unless noted. Five sibling rT4 routing types
+# are intentionally NOT modeled -- see the deferred-types note after this section.
+
+
+class TagRecord(StrictModel):
+    """User-assigned session tag.
+
+    Binary rich path ``append([{type:"tag",tag,sessionId,uuid,timestamp}])`` (set-tag
+    handler); the metadata-reemit path ``$.push({type:"tag",tag,sessionId})`` omits
+    uuid/timestamp. ``tag`` is ``""`` when cleared. Distinct from the slash-command
+    parser's ``{type:"tag",path,push,...}``, which is not a record.
+    """
+
+    type: Literal['tag']
+    tag: str
+    sessionId: str
+    uuid: str | None = None  # Rich set-tag write path only
+    timestamp: str | None = None  # Rich set-tag write path only
+
+
+class AgentColorRecord(StrictModel):
+    """Palette color assigned to a worker-agent session.
+
+    Binary ``JzH(sessionFile,{type:"agent-color",agentColor,sessionId})``; written only
+    when the color is truthy (``"default"`` is skipped).
+    """
+
+    type: Literal['agent-color']
+    agentColor: str
+    sessionId: str
+
+
+class AgentSettingRecord(StrictModel):
+    """Agent-type setting for a session.
+
+    Binary metadata-reemit ``$.push({type:"agent-setting",agentSetting,sessionId})``;
+    ``agentSetting`` is the agentType identifier string (e.g. ``"custom"``), not an object.
+    """
+
+    type: Literal['agent-setting']
+    agentSetting: str
+    sessionId: str
+
+
+class IsolationLatchRecord(StrictModel):
+    """Coordinator/worker isolation side for a session.
+
+    Binary ``Y$4(sessionFile,{type:"isolation-latch",side,sessionId})`` where
+    ``side = isCoordinatorMode() ? "coordinator" : "normal"`` (same projection as
+    SessionModeRecord.mode).
+    """
+
+    type: Literal['isolation-latch']
+    side: Literal['coordinator', 'normal']  # last updated ≤2.1.156
+    sessionId: str
+
+
+class SpeculationAcceptRecord(StrictModel):
+    """Records a speculative-decoding acceptance and the wall-time it saved.
+
+    Binary ``appendFile(sessionFile,{type:"speculation-accept",timestamp,timeSavedMs})``,
+    written only when ``timeSavedMs > 0``. No sessionId/uuid envelope.
+    """
+
+    type: Literal['speculation-accept']
+    timestamp: str
+    timeSavedMs: int
+
+
+class ContentReplacement(StrictModel):
+    """A single tool-result replacement within a ContentReplacementRecord."""
+
+    kind: Literal['tool-result']
+    toolUseId: str
+    replacement: str
+
+
+class ContentReplacementRecord(StrictModel):
+    """Replaces persisted tool-result content (compaction/fork dedup).
+
+    Binary has three write sites: bulk ``{type,sessionId,replacements}``; fork/clone adds
+    ``uuid``+``timestamp``; per-agent (route-by-agent) adds ``agentId``. Each replacement
+    swaps a tool_use's stored output for a compacted form.
+    """
+
+    type: Literal['content-replacement']
+    sessionId: str
+    replacements: Sequence[ContentReplacement]
+    agentId: str | None = None  # Per-agent (route-by-agent) write path only
+    uuid: str | None = None  # Fork/clone write path only
+    timestamp: str | None = None  # Fork/clone write path only
+
+
+class ForkContextRefRecord(StrictModel):
+    """Subagent fork-context pointer linking a forked subagent journal to its parent.
+
+    Binary ``appendEntry({type:"fork-context-ref",agentId,parentSessionId,parentLastUuid,
+    contextLength})`` (route-by-agent -> ``subagents/agent-*.jsonl``). Minimal pointer:
+    no uuid/timestamp/sessionId/cwd envelope -- ``parentSessionId``/``parentLastUuid``
+    reference the parent instead.
+    """
+
+    type: Literal['fork-context-ref']
+    agentId: str
+    parentSessionId: str
+    parentLastUuid: str
+    contextLength: int  # Parent-message COUNT forked into the subagent (binary g.length), not a token count
+
+
+# Deferred rT4 routing types (registered but not modeled -- binary-proven gate unmet):
+#   frame-link            -- routing entry only; no producer/construction site exists.
+#   marble-origami-{commit,snapshot,reset} -- dead code (producers present, zero callers
+#                            in 2.1.162/2.1.163; "context-collapse" feature unshipped);
+#                            spread payload unenumerable.
+#   attribution-snapshot  -- genuine writer, but payload is built behind the module export
+#                            boundary (only {type, messageId} provable).
+# Model each when its feature ships and a real record appears in JSONL (strict validation
+# surfaces it via SessionRecordError).
 
 
 # -- Attachment Record (Claude Code 2.1.90+) -----------------------------------
@@ -3304,6 +3851,17 @@ class HookNonBlockingErrorAttachment(StrictModel):
     durationMs: int
 
 
+class HookCancelledAttachment(StrictModel):
+    """Hook execution was cancelled (e.g., aborted before completion)."""
+
+    type: Literal['hook_cancelled']
+    hookName: str
+    toolUseID: str
+    hookEvent: str
+    command: str
+    durationMs: int
+
+
 class HookAdditionalContextAttachment(StrictModel):
     """Hook returned additional context to inject into the conversation."""
 
@@ -3319,7 +3877,7 @@ class QueuedCommandAttachment(StrictModel):
 
     type: Literal['queued_command']
     prompt: str | Sequence[TextContent | ImageContent]
-    commandMode: str
+    commandMode: Literal['plan', 'prompt', 'task-notification']  # last updated ≤2.1.156
     imagePasteIds: Sequence[int] | None = None  # Present when prompt contains pasted images
     source_uuid: str | None = pydantic.Field(
         None,
@@ -3328,6 +3886,9 @@ class QueuedCommandAttachment(StrictModel):
         'Set by the SDK replay path (Claude Code 2.1.20+ — `SDKUserMessageReplay` events '
         'when `replayUserMessages` is enabled). Note: snake_case in the wire schema, '
         'anomalous vs surrounding camelCase fields.',
+    )
+    origin: UserRecordOrigin | None = pydantic.Field(
+        None, description='Queued-command origin (Claude Code 2.1.157+); see UserRecordOrigin for the kind set.'
     )
 
 
@@ -3347,6 +3908,7 @@ class SkillListingAttachment(StrictModel):
     content: str
     skillCount: int
     isInitial: bool
+    names: Sequence[str] | None = None  # Skill identifiers in the listing (optional)
 
 
 class InvokedSkill(StrictModel):
@@ -3447,6 +4009,7 @@ class OpenedFileInIdeAttachment(StrictModel):
 
     type: Literal['opened_file_in_ide']
     filename: PathField
+    displayPath: str | None = None  # cwd-relative path; present on a minority of records
 
 
 class SelectedLinesInIdeAttachment(StrictModel):
@@ -3566,6 +4129,47 @@ class AutoModeExitAttachment(StrictModel):
     type: Literal['auto_mode_exit']
 
 
+class WorkflowKeywordRequestAttachment(StrictModel):
+    """Workflow-trigger keyword detected in the prompt (Claude Code 2.1.153+).
+
+    Marker injected when a prompt's "workflow" keyword may trigger a dynamic
+    workflow; carries no payload beyond the type tag.
+    """
+
+    type: Literal['workflow_keyword_request']
+
+
+class UltrathinkEffortAttachment(StrictModel):
+    """Ultrathink effort-level indicator for the turn (Claude Code 2.1.139+).
+
+    Marker injected when an ultrathink trigger raises the turn's thinking
+    effort; carries no payload beyond the type tag.
+    """
+
+    type: Literal['ultrathink_effort']
+
+
+class TaskStatusAttachment(StrictModel):
+    """Background-execution status delta (the ``claude agents`` / Agent-tool runtime).
+
+    A "task" here is a background job (``taskType`` local_agent | local_bash; for an agent
+    ``taskId`` IS the agentId) -- the runtime sense, NOT the TaskCreate/TaskUpdate TODO
+    tracker (tell them apart by status: TODO is pending/in_progress/completed; runtime is
+    queued/running/completed/failed/killed). Binary ``{type:"task_status",taskId,taskType,
+    status,description,deltaSummary,outputFilePath}``; ``deltaSummary`` is the running
+    progress summary else the error (nullable). ``status`` is binary-enumerated (literal
+    write sites), unlike server pass-throughs like RateLimitInfo.rateLimitType.
+    """
+
+    type: Literal['task_status']
+    taskId: str
+    taskType: Literal['local_agent', 'local_bash']
+    status: Literal['completed', 'failed', 'killed', 'queued', 'running']
+    description: str
+    deltaSummary: str | None  # progress summary while running, else error; nullable
+    outputFilePath: str
+
+
 AttachmentData = Annotated[
     CompanionIntroAttachment
     | McpInstructionsDeltaAttachment
@@ -3575,6 +4179,7 @@ AttachmentData = Annotated[
     | HookSuccessAttachment
     | HookBlockingErrorAttachment
     | HookNonBlockingErrorAttachment
+    | HookCancelledAttachment
     | HookAdditionalContextAttachment
     | QueuedCommandAttachment
     | DynamicSkillAttachment
@@ -3595,7 +4200,10 @@ AttachmentData = Annotated[
     | CommandPermissionsAttachment
     | DateChangeAttachment
     | AutoModeAttachment
-    | AutoModeExitAttachment,
+    | AutoModeExitAttachment
+    | WorkflowKeywordRequestAttachment
+    | UltrathinkEffortAttachment
+    | TaskStatusAttachment,
     pydantic.Field(discriminator='type'),
 ]
 
@@ -3641,6 +4249,7 @@ SessionRecord = Annotated[
     | BridgeStatusSystemRecord  # Must be before SystemRecord!
     | ScheduledTaskFireSystemRecord  # Must be before SystemRecord!
     | AwaySummarySystemRecord  # Must be before SystemRecord!
+    | AgentsKilledSystemRecord  # Must be before SystemRecord!
     | SystemRecord
     | FileHistorySnapshotRecord
     | QueueOperationRecord
@@ -3653,6 +4262,15 @@ SessionRecord = Annotated[
     | LastPromptRecord
     | WorktreeStateRecord
     | PermissionModeRecord
+    | SessionModeRecord
+    | BridgeSessionRecord
+    | TagRecord
+    | AgentColorRecord
+    | AgentSettingRecord
+    | IsolationLatchRecord
+    | SpeculationAcceptRecord
+    | ContentReplacementRecord
+    | ForkContextRefRecord
     | AttachmentRecord
     | BaseRecord,  # Fallback for unknown system subtypes
     pydantic.Field(union_mode='left_to_right'),
@@ -3698,6 +4316,37 @@ class SessionAnalysis(StrictModel):
     summary_text: str | None = None
     cost_estimate_usd: float | None = None
     duration_seconds: float | None = None
+
+
+# -- Workflow Run-Journal (subagents/workflows/wf_*/journal.jsonl) -------------
+#
+# Claude Code's Workflow tool writes a per-run resume/cache journal: a `started`
+# entry when an agent begins, a `result` entry when its result is recorded.
+# Structurally distinct from transcript records — no uuid/timestamp/sessionId.
+# `result` is the agent's return value, agent-defined and unbounded.
+
+
+class WorkflowJournalStarted(StrictModel):
+    """Run-journal entry written when a workflow agent begins."""
+
+    type: Literal['started']
+    key: str  # Content-addressed cache key: "v2:" + sha256 hex
+    agentId: str  # The agent this entry concerns; matches sibling agent-<agentId>.jsonl
+
+
+class WorkflowJournalResult(StrictModel):
+    """Run-journal entry written when a workflow agent's result is recorded."""
+
+    type: Literal['result']
+    key: str  # Same key as the paired "started" entry
+    agentId: str  # As above; the runtime may record it as '' (empty)
+    result: Any  # strict_typing_linter.py: loose-typing — agent-defined return value, no fixed shape
+
+
+WorkflowJournalRecord = Annotated[
+    WorkflowJournalStarted | WorkflowJournalResult,
+    pydantic.Field(discriminator='type'),
+]
 
 
 # -- Utility Functions ---------------------------------------------------------
@@ -3750,6 +4399,15 @@ _ai_title_adapter = pydantic.TypeAdapter(AiTitleRecord)
 _last_prompt_adapter = pydantic.TypeAdapter(LastPromptRecord)
 _worktree_state_adapter = pydantic.TypeAdapter(WorktreeStateRecord)
 _permission_mode_adapter = pydantic.TypeAdapter(PermissionModeRecord)
+_session_mode_adapter = pydantic.TypeAdapter(SessionModeRecord)
+_bridge_session_adapter = pydantic.TypeAdapter(BridgeSessionRecord)
+_tag_adapter = pydantic.TypeAdapter(TagRecord)
+_agent_color_adapter = pydantic.TypeAdapter(AgentColorRecord)
+_agent_setting_adapter = pydantic.TypeAdapter(AgentSettingRecord)
+_isolation_latch_adapter = pydantic.TypeAdapter(IsolationLatchRecord)
+_speculation_accept_adapter = pydantic.TypeAdapter(SpeculationAcceptRecord)
+_content_replacement_adapter = pydantic.TypeAdapter(ContentReplacementRecord)
+_fork_context_ref_adapter = pydantic.TypeAdapter(ForkContextRefRecord)
 _attachment_adapter = pydantic.TypeAdapter(AttachmentRecord)
 
 
@@ -3812,7 +4470,39 @@ def validate_session_record(
         return _worktree_state_adapter.validate_python(data)
     elif record_type == 'permission-mode':
         return _permission_mode_adapter.validate_python(data)
+    elif record_type == 'mode':
+        return _session_mode_adapter.validate_python(data)
+    elif record_type == 'bridge-session':
+        return _bridge_session_adapter.validate_python(data)
+    elif record_type == 'tag':
+        return _tag_adapter.validate_python(data)
+    elif record_type == 'agent-color':
+        return _agent_color_adapter.validate_python(data)
+    elif record_type == 'agent-setting':
+        return _agent_setting_adapter.validate_python(data)
+    elif record_type == 'isolation-latch':
+        return _isolation_latch_adapter.validate_python(data)
+    elif record_type == 'speculation-accept':
+        return _speculation_accept_adapter.validate_python(data)
+    elif record_type == 'content-replacement':
+        return _content_replacement_adapter.validate_python(data)
+    elif record_type == 'fork-context-ref':
+        return _fork_context_ref_adapter.validate_python(data)
     elif record_type == 'attachment':
         return _attachment_adapter.validate_python(data)
     else:
         return SessionRecordAdapter.validate_python(data)
+
+
+_workflow_journal_adapter: pydantic.TypeAdapter[WorkflowJournalRecord] = pydantic.TypeAdapter(WorkflowJournalRecord)
+
+
+def validate_journal_record(
+    data: Mapping[str, Any],  # strict_typing_linter.py: loose-typing — raw JSON-parsed journal record
+) -> WorkflowJournalRecord:
+    """Validate a Workflow run-journal entry (started/result).
+
+    The journal is a distinct artifact from the session transcript, so its records
+    are validated here rather than through the SessionRecord union.
+    """
+    return _workflow_journal_adapter.validate_python(data)

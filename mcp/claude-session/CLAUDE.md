@@ -50,6 +50,7 @@ Records with `type='attachment'` (discriminated by `attachment.type` field). Att
 | `hook_success` | Hook executed successfully — stdout/exit injected (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `content`, `stdout`, `stderr`, `exitCode`, `command`, `durationMs` |
 | `hook_blocking_error` | Hook returned a blocking error; tool execution halted (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `blockingError` |
 | `hook_non_blocking_error` | Hook returned a non-blocking error; tool continued (v0.2.22) | `hookName`, `toolUseID`, `hookEvent`, `stderr`, `stdout`, `exitCode`, `command`, `durationMs` |
+| `hook_cancelled` | Hook execution was cancelled before completion (v0.2.36) | `hookName`, `toolUseID`, `hookEvent`, `command`, `durationMs` |
 | `hook_additional_context` | Hook returned context to inject into the conversation (v0.2.22) | `content` (str \| Sequence[str]), `hookName`, `toolUseID`, `hookEvent` |
 | `queued_command` | User command queued while Claude was working (v0.2.22) | `prompt` (str \| Sequence), `commandMode`, `imagePasteIds` |
 | `dynamic_skill` | Skill discovered at a non-default location (v0.2.22) | `skillDir`, `skillNames`, `displayPath` |
@@ -538,7 +539,7 @@ Claude Code is computationally irreducible with respect to our concerns. The fil
 
 A test suite that fixtures the current shape of a session directory and asserts our code handles those fixtures will, by construction, continue passing after Claude Code introduces a category the fixtures don't know about. CI stays green; data loss is silent. The properties that normally make a regression suite valuable — determinism, repeatability, independence from external state — actively mislead here. Confidence becomes a function of staleness, which is worse than no tests: the absence of tests prompts the question *how do we verify?*; green tests close that question off.
 
-This rejection applies to *integration*-level tests that fixture the directory shape Claude Code produces. Record-level fixtures that validate stable Pydantic models against captured JSONL — like the existing `tests/claude_session/test_fixtures.py` and the workflow described in [Schema Validation Fix Workflow](#schema-validation-fix-workflow) — remain useful. Those fix a schema we control. The trap is fixturing the host's output.
+This rejection applies to *integration*-level tests that fixture the directory shape Claude Code produces. Record-level fixtures that validate stable Pydantic models against captured JSONL — and the workflow described in [Schema Validation Fix Workflow](#schema-validation-fix-workflow) — remain useful (they fix a schema we control). The trap is fixturing the host's output.
 
 ### The verification loop
 
@@ -549,6 +550,12 @@ An LLM serves as the judge. It enumerates artifacts on both sides, infers catego
 ### Implications
 
 We do not build a regression harness or freeze synthetic session directories. The set of "expected artifact families" is the wrong category — what we need is the set of artifacts the host produced *this run*, which we discover, not declare. Production code handles what we currently know about and surfaces what it doesn't (an `unclassified` tripwire); the ad-hoc loop closes the gaps it finds. Verdicts from the loop — counts, ratios, version-specific field distributions — are ephemeral. They live in the loop's report, not in code comments or docstrings, which document invariants, not survey snapshots that rot. Durable external facts (version cutoffs, behavioral invariants, binary symbols) belong in code; a one-time count or ratio does not. The production code (closing gaps) and this section (keeping the loop replayable) are what persist. Discipline lives in the code's clarity and the loop's rigor, not in green CI that lies about coverage.
+
+### Model the artifact; never exclude it
+
+When the host writes a new artifact category under a session — a sidecar, a journal, an unfamiliar subagent file — classify and **model** it: give it a typed schema and teach the operations (validate, clone, archive, restore) to handle it. Excluding it from validation is never the fix; it is the "100% pass after we stopped enforcing things" lie in a new costume. An artifact the operations don't understand is one they silently corrupt — clone copies references (agentIds, paths) that still point at the source session, archive preserves a shape it can't reconstruct, restore misplaces it. The question that settles model-vs-exclude is never "is this a session *record*?" but "would clone / archive / restore round-trip it correctly?" — and they cannot round-trip what they do not model.
+
+Origin, not convenience, decides this. A third-party payload (an MCP tool result) gets the permissive fallback because its schema is owned elsewhere; a Claude-Code-owned artifact gets modeled, because round-tripping it is our job. Drift-tolerance — the `unclassified` tripwire, lenient extras — is for artifacts we have **not yet characterized**: it buys time to discover a shape, not permission to ignore one we already understand.
 
 ### Bootstrap
 
@@ -611,9 +618,9 @@ When binary identifiers are minified and you need a real name to grep for, `~/cl
 
 ### 3. Binary Verification Gate (BEFORE applying any model edit)
 
-Every proposed field MUST be confirmed via binary string analysis before being added to the schema. The MAIN agent gates fix application on (a)+(c) being aligned — JSONL alone is insufficient evidence.
+The gate is the binary **producer** — the code that *writes* a value into a record (its *write site*), not a *consumer* that only *reads or compares* it. The binary references far more strings than it writes: a producer constructs `origin: { kind: "channel" }` (so the value reaches the JSONL), whereas `if (origin.kind === "human")` is a consumer (checked, never written), and unrelated tagged-unions reuse the key `kind` for other purposes. A bare `grep "channel"` finds all three jumbled together; only the producer (write site) proves a value is real — which is how a bogus 16-value `kind` set collapsed to the true 5.
 
-JSONL can contain:
+JSONL is a confirmation and a drift signal, not the gate. It can contain:
 - Malformed records (model hallucinations from SDK clients)
 - Stale fields from older binary versions
 - Test artifacts
@@ -621,14 +628,14 @@ JSONL can contain:
 
 **Decision rule:**
 
-| JSONL prevalence | Binary presence | Action |
+| Binary producer | JSONL | Action |
 |---|---|---|
-| Yes | Yes | Model the field. High confidence. |
-| Yes | No | **Do not model.** Treat as hallucination candidate — use lenient mode + `sed`-delete the bad line. |
-| No | Yes | Don't model yet (no observed shape evidence). Note as "future field" if relevant. |
+| Yes | Yes | Model it. |
+| Yes | No | **Model it** (binary-proven), with version lineage. Don't wait for it to surface in logs — under strict-everywhere the schema must track the installed binary, so a value the binary already emits should already validate. |
+| No | Yes | **Do not model.** Hallucination — lenient-archive + `sed`-delete the bad line. |
 | No | No | Not in scope. |
 
-If workers (a) and (c) disagree on a field's status, **trust binary**.
+If JSONL and binary disagree, **trust binary**.
 
 ### 4. Fix models
 Edit `claude_session/schemas/session/models.py`. Common fixes:
@@ -638,7 +645,9 @@ Edit `claude_session/schemas/session/models.py`. Common fixes:
 - Union ordering: ensure more-specific types come before less-specific
 
 **Rules:**
-- Only model fields/values **observed in JSONL AND confirmed in binary** (no speculation, no JSONL-only)
+- Model fields/values the **binary producers write** (binary is the gate; JSONL confirms but doesn't gate). For an enum, model the full producer set — every value the installed binary can write — not only the values seen in logs. Never model a JSONL value with no binary producer (that's a hallucination).
+- **Sort Literal members alphabetically** unless a semantic order applies (per root CLAUDE.md Ordering Conventions).
+- **Mark each enum Literal's last-updated version** — a `# last updated 2.1.X` comment next to the field (binary-diff-sourced), the CC version its value set last changed. Per-value history lives in git; the comment just flags the set's currency. Use a `≤` floor when the exact origin predates available binaries, or omit if unsourced.
 - Always use fully typed models, never `dict` fallbacks
 - Minimize churn — don't reorganize existing fields
 - For anomalous wire formats (e.g., snake_case field next to camelCase neighbors), cite the binary literal in the docstring as evidence — saves future readers from "should we camelCase this?" cleanup PRs
@@ -692,14 +701,14 @@ git commit -m "Schema vX.Y.Z: Fix validation for Claude Code X.Y.Z"
 
 **Union-cascade noise.** When errors with identical counts appear across many fields of the same record type, suspect a single missing nested field is causing left-to-right union evaluation to fall through to a wider union member. *Concrete example: 16 fields × 53 records = 848 reported errors collapsed to a single one-line fix when `HookInfo.durationMs: int` was added — `StopHookSummarySystemRecord` already modeled all 16 fields, but Pydantic was bouncing the records into `BaseRecord` because the nested `HookInfo.durationMs` wasn't accepted.* Always check `error_count_per_field == constant_across_many_fields` for the cascade signature before treating the fields as independent issues.
 
-**Strict vs Lenient mode.** `BaseStrictModel` (cc-lib's `StrictModel`) is env-controlled:
+**Strict vs Lenient mode.** `BaseStrictModel` (cc-lib's `StrictModel`) reads `CC_STRICT_MODEL_EXTRA_FORBID` at class-definition (import) time:
 
 | Mode | Env Var | `extra` | Use For |
 |------|---------|---------|---------|
-| Strict | `CC_STRICT_MODEL_EXTRA_FORBID=1` | `forbid` | Validation scripts, schema development |
-| Lenient | `CC_STRICT_MODEL_EXTRA_FORBID=0` (or unset) | `allow` | Operations: archive, clone, delete, restore |
+| Strict | `CC_STRICT_MODEL_EXTRA_FORBID=1` (the standing default, set in settings.json) | `forbid` | Everything — validation *and* operations. Fail-fast on schema drift. |
+| Lenient | `CC_STRICT_MODEL_EXTRA_FORBID=0` | `allow` | The rare escape hatch: cleaning a genuinely-malformed session. |
 
-This resolves the catch-22 where archive/move couldn't handle sessions with unknown fields. When archiving a genuinely malformed session for cleanup:
+Strict applies **everywhere**, operations included, because binary-proven modeling keeps the schema current with the installed binary — so strict only trips on genuine post-binary drift, which is the signal we want (model it, bump, roll). An operation crashing on an unmodeled field is strict working *correctly*; the fix is model+roll, never weakening the operation. (This supersedes the older "operations use lenient" carve-out, which existed only to paper over JSONL-gate schema lag.) To clean a genuinely malformed session, turn strict off for that one command:
 1. Archive with lenient mode: `CC_STRICT_MODEL_EXTRA_FORBID=0 claude-session archive <id> ~/.claude-workspace/claude-session/deleted/<id>-backup.json`
 2. Delete the bad line: `sed -i '' '<line>d' <file>`
 3. Re-validate to confirm 100%
@@ -708,7 +717,7 @@ This resolves the catch-22 where archive/move couldn't handle sessions with unkn
 
 **Worker prompt tips.** Effective worker prompts include specific file paths + line numbers from validation output, numbered investigation sections (one per error category), bash command templates for complex jq/grep queries, explicit read-only instruction, current model definitions for failing types (so worker can propose exact diffs), and version context (`CLAUDE_CODE_MAX_VERSION` vs current `claude --version`).
 
-**Empirical-only modeling.** Every type/value in models.py must trace to BOTH observed JSONL data AND confirmed binary presence. Never speculate. If a boolean field has only been seen as `false`, model as `Literal['false']`, not `bool`. The schema detects drift — speculative values silently accept new patterns we should notice. If JSONL says one thing and binary says another, the binary wins.
+**Binary-proven modeling.** Every type/value in models.py traces to a binary *producer* — a write site (see Binary Verification Gate), not a consumer guard or unrelated-union mention. The binary is the gate and is sufficient: model the full producer set for an enum, including values not yet in JSONL, each with version lineage. JSONL confirms and signals drift but does not gate — a JSONL value with no binary producer is a hallucination (data-clean it). If the binary only ever writes `false` for a field, model `Literal[False]`, not `bool` — tightness comes from the producer, so the schema trips on what the binary doesn't write. If JSONL and binary disagree, the binary wins.
 
 ## Model Definition Ordering
 

@@ -39,6 +39,7 @@ from qdrant_client.http.models import (
 
 from document_search.clients import _retry
 from document_search.schemas.embeddings import EmbeddingVector, SparseIndices, SparseValues
+from document_search.search_config import HYBRID_PREFETCH_FLOOR
 
 logger = logging.getLogger(__name__)
 
@@ -188,12 +189,12 @@ class QdrantClient:
         """Delete the entire collection. Raises if collection doesn't exist."""
         await self._client.delete_collection(collection_name)
 
-    @_retry.qdrant_breaker
     @tenacity.retry(
         retry=tenacity.retry_if_exception(_retry.is_retryable_qdrant_error),
         stop=tenacity.stop_after_attempt(3),
         wait=tenacity.wait_exponential(multiplier=0.5, max=5),
         before_sleep=_retry.log_qdrant_retry,
+        reraise=True,
     )
     async def upsert(
         self,
@@ -315,7 +316,7 @@ class QdrantClient:
                     Prefetch(
                         query=list(dense_vector),
                         using='dense',
-                        limit=50,
+                        limit=max(limit, HYBRID_PREFETCH_FLOOR),
                         filter=query_filter,
                     ),
                     Prefetch(
@@ -324,7 +325,7 @@ class QdrantClient:
                             values=list(sparse_values),
                         ),
                         using='sparse',
-                        limit=50,
+                        limit=max(limit, HYBRID_PREFETCH_FLOOR),
                         filter=query_filter,
                     ),
                 ],

@@ -73,6 +73,24 @@ class TestExecuteCommand:
         assert result.stdout == 'before'
         assert result.exit_code == 7
 
+    def test_explicit_timeout_kills_overrun(self) -> None:
+        """An explicit numeric timeout still SIGKILLs commands that exceed it."""
+        result = asyncio.run(execute_command('sleep 5', timeout=0.5))
+        assert result.exit_code == -1
+        assert result.stdout == '[TIMEOUT]'
+
+    def test_none_timeout_runs_without_limit(self) -> None:
+        """``timeout=None`` skips the ``asyncio.wait_for`` wrapper."""
+        result = asyncio.run(execute_command('sleep 1 && echo done', timeout=None))
+        assert result.stdout == 'done'
+        assert result.exit_code == 0
+
+    def test_default_timeout_is_none(self) -> None:
+        """Omitting ``timeout`` runs without limit."""
+        result = asyncio.run(execute_command('sleep 1 && echo done'))
+        assert result.stdout == 'done'
+        assert result.exit_code == 0
+
     def test_cancellation_kills_subprocess_group(self) -> None:
         """A cancelled ``execute_command`` SIGKILLs the whole subprocess group.
 

@@ -10,7 +10,7 @@ from mcp.types import ToolAnnotations
 from ..models import (
     DownloadResourceResult,
     JavaScriptResult,
-    ResizeWindowResult,
+    WindowSize,
 )
 from ..service import BrowserService
 
@@ -25,26 +25,26 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             idempotentHint=True,
         ),
     )
-    async def resize_window(width: int, height: int) -> ResizeWindowResult:
+    async def resize_window(window_size: WindowSize) -> WindowSize:
         """Resize the browser window to specified dimensions.
 
         Useful for responsive design testing and mobile simulation.
 
         Args:
-            width: Window width in pixels
-            height: Window height in pixels
+            window_size: Target window dimensions (WindowSize(width=..., height=...)).
+                Both fields required; positive ints validated by the WindowSize model.
 
         Returns:
-            Dict with actual width and height after resize
+            WindowSize with actual width and height after resize.
 
         Common presets:
-            - Mobile (iPhone SE): 375 x 667
-            - Tablet (iPad): 768 x 1024
-            - Desktop (1080p): 1920 x 1080
-            - Desktop (1440p): 2560 x 1440
+            - Mobile (iPhone SE): WindowSize(width=375, height=667)
+            - Tablet (iPad): WindowSize(width=768, height=1024)
+            - Desktop (1080p): WindowSize(width=1920, height=1080)
+            - Desktop (1440p): WindowSize(width=2560, height=1440)
 
         Example:
-            resize_window(375, 667)  # Mobile viewport
+            resize_window(WindowSize(width=375, height=667))  # Mobile viewport
             screenshot("mobile-view.png")
 
         Note:
@@ -52,27 +52,36 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
             (e.g., macOS enforces minimum ~500px width). The returned dimensions
             reflect the actual size achieved.
         """
-        return await service.resize_window(width=width, height=height)
+        return await service.resize_window(window_size=window_size)
 
     @mcp.tool(annotations=ToolAnnotations(title='Download Specific Resource', readOnlyHint=False, idempotentHint=False))
     async def download_resource(url: str, output_filename: str) -> DownloadResourceResult:
-        """Download specific resource using current browser session's cookies and headers.
+        """Download a resource using the current browser session's auth state.
 
-        Extracts User-Agent, cookies (with domain scoping), and Referer from the browser
-        session to build browser-realistic requests. Critical for sites with bot detection
-        or CDN hotlink protection — the CDN sees the request as coming from the same browser.
+        Headers are replayed from the page's own recent XHR/fetch traffic, so SPA
+        HttpInterceptor injections (tenant scoping, CSRF tokens, feature flags,
+        traceparent) flow through automatically. Cookies — including HttpOnly —
+        come from the live Selenium session.
 
-        PREREQUISITE: Call navigate() first to establish browser session.
-        Without prior navigation, still works but may encounter bot detection.
+        PREREQUISITE: Call navigate() first. The request log is populated at navigate
+        time; before that, the tool falls back to browser-realistic defaults
+        (User-Agent, Referer, Accept-Language, Sec-Fetch-Dest/Mode/Site).
 
         Args:
             url: Full URL to resource (http:// or https://) or file:// for local files.
             output_filename: Filename to save as (no path). Saved to screenshot temp dir.
 
         Returns:
-            {'path': '/tmp/.../file.js', 'size_bytes': 26703, 'content_type': '...', 'status': 200, 'url': '...'}
+            DownloadResourceResult with path, size_bytes, content_type, status, url.
 
         Errors: Raises ToolError if response status >= 400, network failure, or local file not found.
+
+        Known limitations:
+            - Service Workers intercept fetch/XHR in a separate scope; PWAs that route
+              API traffic through a SW will not populate the request log.
+            - Per-request signature headers (AWS SigV4, x-amz-*, Content-MD5, anything
+              matching signature/hmac/digest) are stripped — they encode a specific
+              request body and won't validate on a different one.
         """
         return await service.download_resource(url=url, output_filename=output_filename)
 

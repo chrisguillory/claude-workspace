@@ -126,11 +126,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
-import psutil
 import typer
-from cc_lib import session_tracker
+from cc_lib import os_process, session_tracker
 from cc_lib.cli import add_help_command, add_install_command, create_app, run_app
 from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.os_process import ProcessHandle
+from cc_lib.picklable import PickleByInitArgs
 from cc_lib.types import CCVersion
 from cc_lib.utils import (
     encode_project_path,
@@ -1144,15 +1145,19 @@ class SessionFile:
     def is_active(self) -> bool:
         """Check if a Claude process is currently running on this session.
 
-        Looks up the session in `cc_lib.session_tracker`'s database and
-        verifies the tracked `claude_pid` via `psutil.pid_exists`. Catches
-        sessions whether they're actively writing or sitting idle awaiting
-        input — both states matter for safety.
+        Looks up the session in `cc_lib.session_tracker`'s database and verifies
+        the tracked claude_pid via ``ProcessHandle.is_alive`` (recycle-defense
+        when ``process_created_at`` is recorded) or a bare alive-check for
+        legacy sessions without the anchor. Catches sessions whether they're
+        actively writing or sitting idle — both states matter for safety.
         """
         db = session_tracker.load_sessions(str(self._path.parent))
         for session in db.sessions:
             if session.session_id == self.session_id and session.state == 'active':
-                return psutil.pid_exists(session.metadata.claude_pid)
+                anchor = session.metadata.process_created_at
+                if anchor is None:
+                    return os_process.is_alive(session.metadata.claude_pid)
+                return ProcessHandle(session.metadata.claude_pid, anchor).is_alive()
         return False
 
     def sidechain_resolver(self) -> SidechainResolver:
@@ -1665,13 +1670,16 @@ class SessionPatchError(Exception):
     """Base for session patcher errors."""
 
 
-class SessionNotFoundError(SessionPatchError):
+class SessionNotFoundError(PickleByInitArgs, SessionPatchError):
     def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
         super().__init__(f"Session '{session_id}' not found")
 
 
-class BackupExistsError(SessionPatchError):
+class BackupExistsError(PickleByInitArgs, SessionPatchError):
     def __init__(self, backup_path: Path, session_id: str) -> None:
+        self.backup_path = backup_path
+        self.session_id = session_id
         super().__init__(
             f'Backup already exists: {backup_path}\n'
             f"Run 'claude-session-patcher restore {session_id}' first, "
@@ -1679,17 +1687,21 @@ class BackupExistsError(SessionPatchError):
         )
 
 
-class ActiveSessionError(SessionPatchError):
+class ActiveSessionError(PickleByInitArgs, SessionPatchError):
     def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
         super().__init__(
             f'Session {session_id} appears to be in active use by Claude. Exit Claude Code first, then retry.',
         )
 
 
-class RestoreOverwriteError(SessionPatchError):
+class RestoreOverwriteError(PickleByInitArgs, SessionPatchError):
     """Raised when the live file has been modified since the backup was taken."""
 
     def __init__(self, session_id: str, live_lines: int, backup_lines: int) -> None:
+        self.session_id = session_id
+        self.live_lines = live_lines
+        self.backup_lines = backup_lines
         delta = live_lines - backup_lines
         if delta > 0:
             change = f'{delta} record(s) appended'

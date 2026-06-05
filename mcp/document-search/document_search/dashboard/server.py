@@ -20,6 +20,7 @@ from typing import TypedDict
 import git
 import pydantic
 import uvicorn
+from cc_lib import os_process
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
@@ -2178,12 +2179,8 @@ def _read_operations() -> Sequence[OperationState]:
 
 
 def _pid_alive(pid: int) -> bool:
-    """Check if a process is alive (signal 0 = existence check)."""
-    try:
-        os.kill(pid, 0)
-        return True
-    except (ProcessLookupError, PermissionError):
-        return False
+    """Check if a process is alive."""
+    return os_process.is_alive(pid)
 
 
 def _mark_orphaned(op: OperationState) -> None:

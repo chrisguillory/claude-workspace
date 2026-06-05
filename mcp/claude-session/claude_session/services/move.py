@@ -40,10 +40,14 @@ from claude_session.schemas.session import SessionRecord
 from claude_session.services.archive import SessionArchiveService
 from claude_session.services.artifacts import (
     AgentFileInfo,
+    AgentStructure,
+    agent_dest_path,
     collect_agent_file_info,
     collect_agent_metadata,
     collect_session_memory,
     collect_tool_results,
+    collect_workflow_journals,
+    collect_workflow_runs,
     detect_agent_structure,
     extract_custom_title_from_records,
     extract_source_project_path,
@@ -51,6 +55,8 @@ from claude_session.services.artifacts import (
     write_jsonl,
     write_session_memory,
     write_tool_results,
+    write_workflow_journals,
+    write_workflow_runs,
 )
 from claude_session.services.delete import is_native_session
 from claude_session.services.discovery import SessionDiscoveryService
@@ -152,6 +158,8 @@ class SessionMoveService:
         # Collect agent file info
         agent_infos = collect_agent_file_info(files_data, agent_structure)
         agent_metadata_files = collect_agent_metadata(source_session_dir, session_info.session_id)
+        workflow_journals = collect_workflow_journals(source_session_dir, session_info.session_id)
+        workflow_runs = collect_workflow_runs(source_session_dir, session_info.session_id)
 
         # Collect tool results
         tool_results = collect_tool_results(source_session_dir, session_info.session_id)
@@ -177,18 +185,19 @@ class SessionMoveService:
         # Main session file
         all_output_paths.append(target_dir / f'{sid}.jsonl')
 
-        # Agent files (preserving flat/nested structure)
+        # Agent files (flat / nested / workflow-nested)
         for info in agent_infos:
             filename = f'agent-{info.agent_id}.jsonl'
-            if info.nested:
-                all_output_paths.append(target_dir / sid / 'subagents' / filename)
-            else:
-                all_output_paths.append(target_dir / filename)
+            all_output_paths.append(agent_dest_path(target_dir, sid, info, filename))
 
-        # Agent metadata sidecars (always nested; same agent_id preserved on move)
-        all_output_paths.extend(
-            target_dir / sid / 'subagents' / meta_filename for meta_filename in agent_metadata_files
-        )
+        # Agent metadata sidecars (nested beside their transcript; agent_id preserved on move)
+        all_output_paths.extend(target_dir / sid / 'subagents' / meta_relpath for meta_relpath in agent_metadata_files)
+
+        # Workflow run-journals (raw copy; ids and runId paths preserved on move)
+        all_output_paths.extend(target_dir / sid / 'subagents' / relpath for relpath in workflow_journals)
+
+        # Workflow run metadata + scripts under <session>/workflows/ (raw copy; ids preserved on move)
+        all_output_paths.extend(target_dir / sid / relpath for relpath in workflow_runs)
 
         # Tool results (flat files + directory files)
         if tool_results:
@@ -262,11 +271,7 @@ class SessionMoveService:
             records = files_data[info.filename]
             filename = f'agent-{info.agent_id}.jsonl'
 
-            if info.nested:
-                output_path = target_dir / sid / 'subagents' / filename
-            else:
-                output_path = target_dir / filename
-
+            output_path = agent_dest_path(target_dir, sid, info, filename)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             translated = self._translate_records(records, translator)
             write_jsonl(output_path, translated, {}, {})
@@ -277,6 +282,16 @@ class SessionMoveService:
         if agent_metadata_files:
             write_agent_metadata(target_dir, sid, agent_metadata_files)
             logger.info('Wrote %d agent metadata sidecars', len(agent_metadata_files))
+
+        # Write Workflow run-journals (raw copy, no translation)
+        if workflow_journals:
+            write_workflow_journals(target_dir, sid, workflow_journals)
+            logger.info('Wrote %d workflow run-journals', len(workflow_journals))
+
+        # Write Workflow run metadata + scripts (raw copy, no translation)
+        if workflow_runs:
+            write_workflow_runs(target_dir, sid, workflow_runs)
+            logger.info('Wrote %d workflow run files', len(workflow_runs))
 
         # Write tool results (raw copy, no translation)
         if tool_results:
@@ -322,16 +337,23 @@ class SessionMoveService:
 
             # Delete agent files
             for info in agent_infos:
-                if info.nested:
-                    agent_path = source_session_dir / sid / 'subagents' / f'agent-{info.agent_id}.jsonl'
-                else:
-                    agent_path = source_session_dir / f'agent-{info.agent_id}.jsonl'
+                agent_path = agent_dest_path(source_session_dir, sid, info, f'agent-{info.agent_id}.jsonl')
                 agent_path.unlink()
                 files_deleted += 1
 
             # Delete agent metadata sidecars
-            for meta_filename in agent_metadata_files:
-                (source_session_dir / sid / 'subagents' / meta_filename).unlink()
+            for meta_relpath in agent_metadata_files:
+                (source_session_dir / sid / 'subagents' / meta_relpath).unlink()
+                files_deleted += 1
+
+            # Delete Workflow run-journals
+            for relpath in workflow_journals:
+                (source_session_dir / sid / 'subagents' / relpath).unlink()
+                files_deleted += 1
+
+            # Delete Workflow run metadata + scripts under <session>/workflows/
+            for relpath in workflow_runs:
+                (source_session_dir / sid / relpath).unlink()
                 files_deleted += 1
 
             # Delete tool results (flat files)
@@ -424,7 +446,9 @@ class SessionMoveService:
             raise FileNotFoundError(f'No session found matching: {session_id_or_prefix}')
         return match
 
-    async def _discover_session_files(self, session_info: SessionInfo) -> tuple[Sequence[Path], Mapping[str, bool]]:
+    async def _discover_session_files(
+        self, session_info: SessionInfo
+    ) -> tuple[Sequence[Path], Mapping[str, AgentStructure]]:
         """Discover all JSONL files for a session with structure detection.
 
         Returns:
@@ -441,7 +465,7 @@ class SessionMoveService:
             raise FileNotFoundError(f'Main session file not found: {main_file}')
 
         session_files = [main_file]
-        agent_structure: dict[str, bool] = {}
+        agent_structure: dict[str, AgentStructure] = {}
 
         # Find agent files belonging to this session (both flat and nested)
         result = subprocess.run(
@@ -461,8 +485,9 @@ class SessionMoveService:
         if result.stdout.strip():
             agent_files = [Path(line) for line in result.stdout.strip().split('\n')]
             for agent_path in agent_files:
-                is_nested = detect_agent_structure(agent_path, session_info.session_id, session_dir)
-                agent_structure[agent_path.name] = is_nested
+                agent_structure[agent_path.name] = detect_agent_structure(
+                    agent_path, session_info.session_id, session_dir
+                )
             session_files.extend(agent_files)
 
         logger.info('Found %d session files (%d agents)', len(session_files), len(agent_structure))

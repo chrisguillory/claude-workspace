@@ -8,9 +8,10 @@ from collections.abc import Sequence, Set
 from datetime import UTC, datetime
 from pathlib import Path
 
-import psutil
 from filelock import FileLock
 
+from cc_lib import os_process
+from cc_lib.os_process import ProcessHandle
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.types import CCVersion, JsonDatetime, SessionSource, SessionState
 from cc_lib.utils import get_claude_workspace_config_home_dir
@@ -263,18 +264,14 @@ class SessionManager:
             rival_pid = session.metadata.claude_pid
             if rival_pid == claude_pid:
                 continue
-            if not psutil.pid_exists(rival_pid):
-                continue
             recorded_create_at = session.metadata.process_created_at
             if recorded_create_at is None:
-                return session
-            try:
-                actual_create_time = psutil.Process(rival_pid).create_time()
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                # Legacy session without anchor — fall back to alive-check only.
+                if os_process.is_alive(rival_pid):
+                    return session
                 continue
-            if abs(actual_create_time - recorded_create_at.timestamp()) > 1.0:
-                continue  # PID recycled — different process now owns it
-            return session
+            if ProcessHandle(rival_pid, recorded_create_at).is_alive():
+                return session
         return None
 
     def detect_crashed_sessions(self) -> Sequence[str]:
@@ -294,7 +291,7 @@ class SessionManager:
                 updated_sessions.append(session)
                 continue
 
-            if not psutil.pid_exists(session.metadata.claude_pid):
+            if not os_process.is_alive(session.metadata.claude_pid):
                 # Create new session with crashed state
                 crashed_session = Session(
                     session_id=session.session_id,

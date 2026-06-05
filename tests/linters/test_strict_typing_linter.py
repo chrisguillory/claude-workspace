@@ -13,24 +13,15 @@ Validates two test files:
 
 from __future__ import annotations
 
-import ast
 import re
 from collections.abc import Mapping, Sequence, Set
 from pathlib import Path
-from typing import NamedTuple
 
 import pytest
 
-from tests.linters.helpers import run_linter
+from tests.linters.helpers import LineRange, get_class_ranges, run_linter
 
 # -- Data Types ---------------------------------------------------------------
-
-
-class LineRange(NamedTuple):
-    """Line range for a class definition (inclusive)."""
-
-    start: int
-    end: int
 
 
 # Maps class name to set of violation kinds found/expected in that class
@@ -68,12 +59,19 @@ EXPECTED_VIOLATIONS: ViolationMap = {
     'InnerNotHashable': {'tuple-field'},  # Nested class doesn't inherit flag
     # Regular class with hashable
     'RegularClassHashableViolation': {'hashable-field'},
+    # frozenset-constant violations
+    'FrozensetConstantAnnotation': {'frozenset'},
+    'FrozensetConstantBareValue': {'frozenset'},
+    'FrozensetConstantClassVar': {'frozenset'},
+    'FrozensetConstantUnion': {'frozenset'},
+    'FrozensetConstantHalfMigrated': {'frozenset'},
 }
 
 # Classes/functions with suppression directives (should NOT appear in output)
 SUPPRESSED_NAMES: Set[str] = {
     'TupleFieldSuppressed',
     'HashableFieldSuppressed',
+    'FrozensetSuppressed',
 }
 
 # -- Expected Violations: Edge Case File --------------------------------------
@@ -274,33 +272,6 @@ def test_edge_case_no_unexpected(edge_case_results: tuple[ViolationMap, Set[str]
     assert not unexpected, '\n'.join(sorted(unexpected))
 
 
-# -- Private Helpers ----------------------------------------------------------
-
-
-# -- AST Parsing --------------------------------------------------------------
-
-
-def get_class_line_ranges(filepath: Path) -> Mapping[str, LineRange]:
-    """Parse AST to get line ranges for each class.
-
-    Returns dict mapping class name to (start_line, end_line).
-    Uses ast.walk to find classes inside any compound statement (try, if, with, etc.).
-
-    Note: Duplicate class names (same name at different scopes) will overwrite each other.
-    Test files should use unique class names to avoid this limitation.
-    """
-    source = filepath.read_text(encoding='utf-8')
-    tree = ast.parse(source)
-
-    ranges: dict[str, LineRange] = {}
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef) and node.end_lineno is not None:
-            ranges[node.name] = LineRange(node.lineno, node.end_lineno)
-
-    return ranges
-
-
 # -- Linter Output Parsing ----------------------------------------------------
 
 
@@ -317,6 +288,7 @@ def parse_linter_output(output: str) -> Sequence[tuple[int, str]]:
         (r'.+:(\d+):\d+: error: Unhashable type', 'hashable-field'),
         (r'.+:(\d+):\d+: error: Mutable type', 'mutable'),
         (r'.+:(\d+):\d+: error: Loose type', 'loose'),
+        (r'.+:(\d+):\d+: error: frozenset constant', 'frozenset'),
     ]
 
     for line in output.splitlines():
@@ -357,12 +329,15 @@ def map_violations_to_classes(
     return result
 
 
+# -- Private Helpers ----------------------------------------------------------
+
+
 def _build_actual_map(test_file: Path) -> tuple[ViolationMap, Set[str]]:
     """Run linter and build actual violation map for a test file.
 
     Returns (violation_map, all_class_names).
     """
-    ranges = get_class_line_ranges(test_file)
+    ranges = get_class_ranges(test_file)
     output = run_linter(test_file, LINTER)
     violations = parse_linter_output(output)
     actual = map_violations_to_classes(violations, ranges)

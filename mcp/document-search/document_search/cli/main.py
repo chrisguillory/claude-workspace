@@ -16,7 +16,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal, TypedDict
-from uuid import UUID
 
 import typer
 from cc_lib.cli import add_completion_command, add_help_command, create_app, run_app
@@ -35,7 +34,6 @@ from document_search.schemas.config import create_config, default_config
 from document_search.schemas.embeddings import EmbedRequest
 from document_search.schemas.indexing import StopAfterStage
 from document_search.schemas.vectors import (
-    ClearResult,
     CollectionMetadata,
     EmbeddingInfo,
     IndexInfo,
@@ -43,6 +41,7 @@ from document_search.schemas.vectors import (
     SearchResult,
     SearchType,
 )
+from document_search.search_config import MAX_SEARCH_RESULTS, clamp_search_limit, format_snippet, rerank_candidate_count
 from document_search.search_path import (
     ResolvedPaths,
     resolve_filter_paths,
@@ -50,7 +49,6 @@ from document_search.search_path import (
     resolve_search_paths,
     to_repo_filter,
 )
-from document_search.services.embedding import FileCacheIndex
 
 logger = logging.getLogger(__name__)
 
@@ -340,13 +338,31 @@ def search(
             help='Path scope. Default: current directory. Repeat -p to scope multiple paths. Each path must exist on disk. Use "**" alone for global; globs are not supported.',
         ),
     ] = ['.'],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
-    limit: Annotated[int, typer.Option('--limit', '-n', help='Max results.')] = 10,
+    limit: Annotated[int, typer.Option('--limit', '-n', help=f'Max results (capped at {MAX_SEARCH_RESULTS}).')] = 10,
     search_type: Annotated[SearchType, typer.Option('--type', '-t', help='Search strategy.')] = 'hybrid',
+    file_types: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[FileType] | None,
+        typer.Option('--file-type', help='Filter by file type (repeat for multiple). Default: all types.'),
+    ] = None,
     exclude_paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
         list[str], typer.Option('--exclude', '-x', help='Exclude files under these paths.')
     ] = [],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     min_score: Annotated[
         float | None, typer.Option('--min-score', help='Minimum relevance score (0.0 = relevant).')
+    ] = None,
+    snippet_chars: Annotated[
+        int | None,
+        typer.Option(
+            '--snippet-chars', min=1, help='Truncate each result snippet to N chars (default: full text, matching MCP).'
+        ),
+    ] = None,
+    search_timeout: Annotated[
+        int | None,
+        typer.Option(
+            '--search-timeout',
+            min=1,
+            help="Qdrant search timeout in seconds. Raise for large path='**' searches. Default: client setting.",
+        ),
     ] = None,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
@@ -359,10 +375,21 @@ def search(
         document-search search "error handling" --limit 5 -f json
         document-search search "config" --exclude /path/to/noise/
         document-search search "retry logic" --min-score 0.0
+        document-search search "deploy steps" --file-type markdown
     """
     asyncio.run(
         _search_async(
-            query, _resolve_collection(collection), paths, limit, search_type, exclude_paths, min_score, format
+            query,
+            _resolve_collection(collection),
+            paths,
+            limit,
+            search_type,
+            file_types,
+            exclude_paths,
+            min_score,
+            snippet_chars,
+            search_timeout,
+            format,
         )
     )
 
@@ -417,6 +444,13 @@ def index(
             help='Redis URL query params (passthrough to redis-py). e.g. "socket_timeout=120&socket_connect_timeout=120". Raise on slow hosts where indexing hits Redis timeouts.',
         ),
     ] = None,
+    include_timing: Annotated[
+        bool,
+        typer.Option(
+            '--include-timing/--no-include-timing',
+            help='Include pipeline timing in --format json (default: off, matching the MCP tool).',
+        ),
+    ] = False,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Index documents for search.
@@ -436,6 +470,7 @@ def index(
             chunk_timeout,
             embed_workers,
             redis_url_params,
+            include_timing,
             format,
         ),
     )
@@ -519,15 +554,19 @@ async def _info_async(collection_name: str, paths: Sequence[str], format: Output
         typer.echo(f'  Name: {collection.name}')
         if collection.description:
             typer.echo(f'  Description: {collection.description}')
+        typer.echo(f'  Created: {collection.created_at}')
         typer.echo()
 
         typer.secho('Embedding:', bold=True)
         typer.echo(f'  Provider: {embedding_info.provider}/{embedding_info.model}')
         typer.echo(f'  Dimensions: {embedding_info.dimensions}')
         typer.echo(f'  Batch size: {embedding_info.batch_size}')
+        if embedding_info.requests_per_minute is not None:
+            typer.echo(f'  Requests/min: {embedding_info.requests_per_minute}')
         typer.echo()
 
         typer.secho('Storage:', bold=True)
+        typer.echo(f'  Vector dim: {storage.vector_dimension}')
         typer.echo(f'  Points: {storage.points_count}')
         typer.echo(f'  Status: {storage.status}')
         typer.echo()
@@ -535,9 +574,15 @@ async def _info_async(collection_name: str, paths: Sequence[str], format: Output
         typer.secho('Content:', bold=True)
         typer.echo(f'  Chunks: {content.total_chunks}')
         typer.echo(f'  Files: {content.unique_files}')
+        typer.echo(f'  Supported types: {", ".join(content.supported_types)}')
         if content.by_file_type:
-            typer.echo(f'  Types: {dict(content.by_file_type)}')
+            typer.echo('  Types:')
+            for ftype, count in content.by_file_type.items():
+                typer.echo(f'    {ftype}: {count}')
         typer.echo()
+
+        if info_result.paths:
+            typer.echo(f'Scope: {", ".join(info_result.paths)}')
 
         if dashboard_url:
             typer.secho(f'Dashboard: {dashboard_url}', fg=typer.colors.CYAN)
@@ -575,8 +620,12 @@ async def _list_async(
             typer.echo('No indexed files found.')
             return
 
+        chunk_w = max(len(str(f.chunk_count)) for f in files)
+        type_w = max(len(f.file_type) for f in files)
         for f in files:
-            typer.echo(f'{f.chunk_count:4d} chunks  {f.file_type:<10s}  {f.path}')
+            typer.echo(f'{f.chunk_count:>{chunk_w}d} chunks  {f.file_type:<{type_w}s}  {f.path}')
+        if len(files) == limit:
+            typer.echo(f'(showing first {limit} — pass --limit for more)')
 
 
 async def _clear_async(
@@ -591,51 +640,48 @@ async def _clear_async(
             typer.secho(f"Collection '{collection_name}' not found.", fg=typer.colors.RED, err=True)
             raise typer.Exit(1)
 
+        config = default_config(collection.provider)
+        embedding_client = create_embedding_client(
+            create_config(
+                provider=collection.provider,
+                embedding_model=collection.model,
+                embedding_dimensions=collection.dimensions,
+            )
+        )
+
+        # fmt: off — lazy imports: ML frameworks add ~1s startup
+        from document_search.services.chunking import ChunkingService  # noqa: PLC0415 — lazy
+        from document_search.services.embedding import EmbeddingService  # noqa: PLC0415 — lazy
+        from document_search.services.indexing import IndexingService  # noqa: PLC0415 — lazy
+        from document_search.services.sparse_embedding import SparseEmbeddingService  # noqa: PLC0415 — lazy
+        # fmt: on
+
+        chunking_service = await ChunkingService.create()
+        sparse_service = await SparseEmbeddingService.create()
+        embedding_service = EmbeddingService(
+            embedding_client,
+            batch_size=config.batch_size,
+            redis=ctx.redis,
+            model=collection.model,
+            dimensions=collection.dimensions,
+        )
         state_store = IndexStateStore(ctx.redis, collection_name)
         repository = DocumentVectorRepository(ctx.qdrant, collection_name, state_store)
 
-        if any(p == '**' for p in paths):
-            if clear_cache:
-                total_invalidated = 0
-                async for index_key in ctx.redis.scan_iter(match=FileCacheIndex.glob()):
-                    cache_keys = await ctx.redis.smembers(index_key)
-                    if cache_keys:
-                        await ctx.redis.unlink(*cache_keys, index_key)
-                        total_invalidated += len(cache_keys)
-                logger.info('Invalidated %d cached embeddings', total_invalidated)
+        indexing_service = IndexingService(
+            chunking_service=chunking_service,
+            embedding_service=embedding_service,
+            sparse_embedding_service=sparse_service,
+            repository=repository,
+            state_store=state_store,
+        )
 
-            chunks_count = await repository.count()
-            await repository.delete_collection()
-            await state_store.clear_collection()
-            result = ClearResult(files_removed=0, chunks_removed=chunks_count, paths=None)
-        else:
-            total_files = 0
-            total_chunks = 0
-            for resolved_path in paths:
-                if clear_cache:
-                    async for index_key in ctx.redis.scan_iter(match=FileCacheIndex.glob(resolved_path)):
-                        cache_keys = await ctx.redis.smembers(index_key)
-                        if cache_keys:
-                            await ctx.redis.unlink(*cache_keys, index_key)
-
-                file_state = await state_store.get_file_state(resolved_path)
-                if file_state is not None:
-                    chunk_ids = list(file_state.chunk_ids)
-                    if chunk_ids:
-                        await repository.delete(chunk_ids)
-                    await state_store.delete_file_state(resolved_path)
-                    total_files += 1
-                    total_chunks += len(chunk_ids)
-                else:
-                    all_chunk_ids = await state_store.get_chunk_ids_under_path(resolved_path)
-                    if all_chunk_ids:
-                        await repository.delete([UUID(cid) for cid in all_chunk_ids])
-                    files_under = await state_store.get_files_under_path(resolved_path)
-                    await state_store.delete_files_under_path(resolved_path)
-                    total_files += len(files_under)
-                    total_chunks += len(all_chunk_ids)
-
-            result = ClearResult(files_removed=total_files, chunks_removed=total_chunks, paths=paths)
+        try:
+            result = await indexing_service.clear_documents(paths, clear_cache=clear_cache)
+        finally:
+            chunking_service.shutdown()
+            sparse_service.shutdown()
+            await embedding_client.close()
 
         if format == 'json':
             typer.echo(result.model_dump_json(indent=2))
@@ -652,8 +698,11 @@ async def _search_async(
     paths: Sequence[str],
     limit: int,
     search_type: SearchType,
+    file_types: Sequence[FileType] | None,
     exclude_paths: Sequence[str],
     min_score: float | None,
+    snippet_chars: int | None,
+    search_timeout: int | None,
     format: OutputFormat,
 ) -> None:
     source_prefixes = to_repo_filter(resolve_search_paths(paths, scope_hint='global scope'))
@@ -707,8 +756,8 @@ async def _search_async(
                 sparse_indices = np_indices.tolist()
                 sparse_values = np_values.tolist()
 
-            effective_limit = min(max(limit, 1), 100)
-            rerank_candidates = min(effective_limit * 3, 200)
+            effective_limit = clamp_search_limit(limit)
+            rerank_candidates = rerank_candidate_count(effective_limit)
 
             search_query = SearchQuery(
                 search_type=search_type,
@@ -716,11 +765,12 @@ async def _search_async(
                 sparse_indices=sparse_indices,
                 sparse_values=sparse_values,
                 limit=rerank_candidates,
+                file_types=file_types,
                 source_path_prefixes=source_prefixes,
                 exclude_path_prefixes=resolved_excludes,
             )
 
-            result = await repository.search(search_query)
+            result = await repository.search(search_query, search_timeout=search_timeout)
             result = await reranker.rerank(query=query, result=result, top_k=effective_limit)
 
             if min_score is not None:
@@ -741,8 +791,9 @@ async def _search_async(
                 typer.secho(f'  {hit.score:.4f}  {hit.source_path}', bold=True)
                 if hit.heading_context:
                     typer.echo(f'         {hit.heading_context}')
-                snippet = hit.text[:200].replace('\n', ' ')
-                typer.echo(f'         {snippet}')
+                snippet = format_snippet(hit.text, max_chars=snippet_chars)
+                for line in snippet.split('\n'):
+                    typer.echo(f'         {line}')
                 typer.echo()
         finally:
             sparse_service.shutdown()
@@ -762,6 +813,7 @@ async def _index_async(
     chunk_timeout: int | None,
     embed_workers: int | None,
     redis_url_params: str | None,
+    include_timing: bool,
     format: OutputFormat,
 ) -> None:
     resolved_paths = resolve_index_paths([str(p) for p in paths])
@@ -840,6 +892,9 @@ async def _index_async(
                 redis_client=ctx.redis,
                 **index_overrides,
             )
+
+            if not include_timing:
+                result = result.__replace__(timing=None)
 
             if format == 'json':
                 typer.echo(json.dumps(result.model_dump(mode='json'), indent=2, default=str))

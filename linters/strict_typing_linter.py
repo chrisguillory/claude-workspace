@@ -9,8 +9,9 @@ This script enforces immutable interface types and module organization:
 1. IMMUTABLE TYPES: Use Sequence/Mapping/Set instead of list/dict/set
 2. STRICT TYPING: No Any, Mapping[str, Any], Sequence[Any] etc.
 3. TUPLE FIELDS: Flag tuple[X, ...] in class fields (use Sequence[T] instead)
-4. HASHABLE FIELDS (opt-in): Enforce hashable types via __strict_typing_linter__hashable_fields__
-5. MODULE ORDERING: Public before private, classes before functions
+4. FROZENSET CONSTANTS: Flag frozenset[T] annotations and `= frozenset(...)` values (use collections.abc.Set[T] = {...})
+5. HASHABLE FIELDS (opt-in): Enforce hashable types via __strict_typing_linter__hashable_fields__
+6. MODULE ORDERING: Public before private, classes before functions
 
 Checks ALL function/method parameters, return types, and class field annotations.
 Skips non-frozen dataclasses and attrs classes (mutable by design).
@@ -33,6 +34,7 @@ Design Philosophy:
       - # strict_typing_linter.py: mutable-type - suppress mutable type violations
       - # strict_typing_linter.py: loose-typing - suppress loose typing violations
       - # strict_typing_linter.py: tuple-field - suppress tuple-in-field violations
+      - # strict_typing_linter.py: frozenset-constant - suppress frozenset-constant violations
       - # strict_typing_linter.py: hashable-field - suppress unhashable-field violations
       - # strict_typing_linter.py: ordering - suppress all ordering violations
       - # strict_typing_linter.py: class-ordering - suppress class-before-function violations
@@ -177,6 +179,7 @@ type DirectiveCode = Literal[
     'mutable-type',
     'loose-typing',
     'tuple-field',
+    'frozenset-constant',
     'hashable-field',
     'ordering',
     'class-ordering',
@@ -186,7 +189,7 @@ type DirectiveCode = Literal[
 ]
 
 # Violation kind literals - used in discriminated unions
-type TypeViolationKind = Literal['mutable', 'loose', 'tuple-field', 'hashable-field']
+type TypeViolationKind = Literal['mutable', 'loose', 'tuple-field', 'frozenset', 'hashable-field']
 type OrderingViolationKind = Literal['ordering', 'class-ordering', 'missing-all', 'trailing-comma', 'unused-directive']
 type ViolationKind = TypeViolationKind | OrderingViolationKind
 
@@ -252,6 +255,7 @@ CODE_TO_KINDS: Mapping[DirectiveCode, Set[ViolationKind]] = {
     'mutable-type': {'mutable'},
     'loose-typing': {'loose'},
     'tuple-field': {'tuple-field'},
+    'frozenset-constant': {'frozenset'},
     'hashable-field': {'hashable-field'},
     'ordering': {'ordering', 'class-ordering', 'missing-all', 'trailing-comma'},
     'class-ordering': {'class-ordering'},
@@ -399,13 +403,14 @@ def parse_args() -> argparse.Namespace:
             'mutable-type',
             'loose-typing',
             'tuple-field',
+            'frozenset-constant',
             'hashable-field',
             'ordering',
             'class-ordering',
             'missing-all',
             'trailing-comma',
         ],
-        help='Violation codes to ignore (mutable-type, loose-typing, tuple-field, hashable-field, ordering, missing-all, trailing-comma)',
+        help='Violation codes to ignore (mutable-type, loose-typing, tuple-field, frozenset-constant, hashable-field, ordering, missing-all, trailing-comma)',
     )
     parser.add_argument(
         '--no-gitignore',
@@ -615,6 +620,26 @@ class AnnotationChecker(ast.NodeVisitor):
             self._check_annotation(node.annotation, node.lineno, 'field')
             if is_cv:
                 self._classvar_depth -= 1
+            # A frozenset *value* under a non-frozenset annotation (e.g. a half-migrated
+            # `X: Set[str] = frozenset(...)`). Pass 4 already covers a frozenset annotation,
+            # so only flag here when the annotation itself isn't frozenset.
+            if (
+                not self._hashable_fields
+                and self._is_frozenset_call(node.value)
+                and not self._find_frozenset(node.annotation)
+            ):
+                self._add_frozenset_violation(node.lineno, getattr(node.value, 'col_offset', 0), 'frozenset')
+        self.generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        """Flag bare module/class-level constants assigned a frozenset(...) value."""
+        if (
+            self._function_depth == 0
+            and not self._skip_class_fields
+            and not self._hashable_fields
+            and self._is_frozenset_call(node.value)
+        ):
+            self._add_frozenset_violation(node.lineno, getattr(node.value, 'col_offset', 0), 'frozenset')
         self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -739,10 +764,11 @@ class AnnotationChecker(ast.NodeVisitor):
     ) -> None:
         """Check if an annotation contains forbidden types.
 
-        Three-pass checking for field annotations:
+        Four-pass checking for field annotations:
         1. tuple-field: Flag tuple[X, ...] in fields (outside hashable context)
         2. hashable-field: Flag Sequence/Mapping in fields (inside hashable context)
         3. mutable/loose: Existing checks (all contexts)
+        4. frozenset: Flag frozenset[T] constants (outside hashable context)
         """
         source_line = ''
         if 0 < lineno <= len(self.source_lines):
@@ -824,6 +850,22 @@ class AnnotationChecker(ast.NodeVisitor):
                 ),
             )
 
+        # Pass 4: frozenset annotation (outside hashable context). frozenset is hashable, so it
+        # is the right choice inside a hashable-fields class; elsewhere a read-only set constant
+        # reads cleaner as ``Set[T] = {...}`` than the double-nested ``frozenset({...})``. A
+        # frozenset *value* under a non-frozenset annotation is caught in visit_AnnAssign /
+        # visit_Assign instead.
+        if context == 'field' and not self._hashable_fields:
+            frozenset_name = self._find_frozenset(node)
+            if frozenset_name:
+                self._add_frozenset_violation(
+                    lineno,
+                    getattr(node, 'col_offset', 0),
+                    frozenset_name,
+                    scope_start=scope_start,
+                    scope_end=scope_end,
+                )
+
     def _is_classvar(self, node: ast.expr) -> bool:
         """Check if annotation is a ClassVar (not an instance field)."""
         if isinstance(node, ast.Subscript):
@@ -894,6 +936,89 @@ class AnnotationChecker(ast.NodeVisitor):
         if isinstance(node, ast.Tuple):
             return any(self._find_tuple_field(elt) for elt in node.elts)
         return self._find_tuple_field(node)
+
+    def _find_frozenset(self, node: ast.expr) -> str | None:
+        """Find a top-level frozenset container in an annotation; return its name or None.
+
+        Matches ``frozenset`` / ``frozenset[T]`` (and the ``typing.FrozenSet`` alias) when it is
+        the annotation itself, wrapped in ClassVar/Final/Annotated, or a member of a top-level
+        union. Deliberately does NOT descend into other containers' type arguments (e.g.
+        ``dict[frozenset[str], int]``): a nested frozenset is often a hashability-required key
+        and must stay a frozenset.
+        """
+        if isinstance(node, (ast.Name, ast.Attribute)):
+            short = node.id if isinstance(node, ast.Name) else node.attr
+            resolved = resolve_qualified_name(node, self.import_map)
+            if resolved in ('builtins.frozenset', 'typing.FrozenSet', 'typing_extensions.FrozenSet'):
+                return short
+            return short if short in ('frozenset', 'FrozenSet') else None
+
+        if isinstance(node, ast.Subscript):
+            kind, resolved = self._classify_subscript(node)
+            if kind is SubscriptKind.LITERAL:
+                return None
+            if kind is SubscriptKind.ANNOTATED:
+                return self._find_frozenset(self._get_annotated_type_arg(node))
+            if resolved in (
+                'typing.ClassVar',
+                'typing_extensions.ClassVar',
+                'typing.Final',
+                'typing_extensions.Final',
+            ):
+                return self._find_frozenset(node.slice)
+            return self._find_frozenset(node.value)
+
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+            return self._find_frozenset(node.left) or self._find_frozenset(node.right)
+
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            expr_node = ast.parse(node.value, mode='eval').body
+            return self._find_frozenset(expr_node)
+
+        return None
+
+    def _is_frozenset_call(self, node: ast.expr | None) -> bool:
+        """True if ``node`` is a ``frozenset(...)`` constructor call."""
+        if not isinstance(node, ast.Call):
+            return False
+        func = node.func
+        if isinstance(func, ast.Name) and func.id == 'frozenset':
+            return True
+        if isinstance(func, (ast.Name, ast.Attribute)):
+            return resolve_qualified_name(func, self.import_map) == 'builtins.frozenset'
+        return False
+
+    def _add_frozenset_violation(
+        self,
+        lineno: int,
+        column: int,
+        bad_type: str,
+        *,
+        scope_start: int | None = None,
+        scope_end: int | None = None,
+    ) -> None:
+        """Record a frozenset-constant violation (shared by the annotation and value checks)."""
+        self.raw_violations.append((lineno, 'frozenset-constant'))
+        if self._has_directive(lineno, 'frozenset', scope_start=scope_start, scope_end=scope_end):
+            return
+        source_line = self.source_lines[lineno - 1].strip() if 0 < lineno <= len(self.source_lines) else ''
+        self.violations.append(
+            TypeViolation(
+                filepath=self.filepath,
+                line=lineno,
+                column=column,
+                context='field',
+                bad_type=bad_type,
+                kind='frozenset',
+                source_line=source_line,
+                suggestion=(
+                    'annotate as Set[T] (from collections.abc) and use a set literal `{...}` or '
+                    'set(...): `X: Set[str] = {...}` instead of `frozenset[str] = frozenset({...})`. '
+                    'frozenset is needed only where the value must be hashable (a dict key or set '
+                    'member) — silence those with the directive below.'
+                ),
+            ),
+        )
 
     def _find_unhashable_field(self, node: ast.expr) -> str | None:
         """Recursively check if annotation contains unhashable types.
@@ -1240,6 +1365,7 @@ class AnnotationChecker(ast.NodeVisitor):
         'mutable': 'mutable-type',
         'loose': 'loose-typing',
         'tuple-field': 'tuple-field',
+        'frozenset': 'frozenset-constant',
         'hashable-field': 'hashable-field',
     }
 
@@ -1619,15 +1745,33 @@ def _has_fixture_decorator(
     return False
 
 
-def has_ordering_directive(source_lines: Sequence[str], lineno: int) -> bool:
-    """Check if line has ordering suppression directive."""
+def _kinds_for(code: str) -> Set[str]:
+    """Violation kinds the directive ``code`` covers via ``CODE_TO_KINDS``.
+
+    Codes are parsed from directive text (so the key is ``str``); iterating ``.items()`` keeps the
+    Literal-keyed mapping mypy-clean, and an unknown code yields an empty set.
+    """
+    for directive_code, family in CODE_TO_KINDS.items():
+        if directive_code == code:
+            return family
+    return set()
+
+
+def has_structural_directive(source_lines: Sequence[str], lineno: int, kind: OrderingViolationKind) -> bool:
+    """Check whether line ``lineno`` carries a directive whose code covers structural ``kind``.
+
+    A code ``C`` suppresses kind ``K`` when ``K in CODE_TO_KINDS[C]``: the ``ordering`` umbrella
+    suppresses any structural kind, while the specific codes (``class-ordering``, ``missing-all``,
+    ``trailing-comma``) suppress only their own. Replaces the kind-agnostic ``has_ordering_directive``
+    so the specific structural codes actually suppress, not just ``ordering``/``class-ordering``.
+    """
     if 0 < lineno <= len(source_lines):
         line = source_lines[lineno - 1].lower()
         if DIRECTIVE_PREFIX.lower() in line:
             idx = line.find(DIRECTIVE_PREFIX.lower())
             codes_part = line[idx + len(DIRECTIVE_PREFIX) :]
             codes = [c.strip().split()[0] for c in codes_part.split(',') if c.strip()]
-            return 'ordering' in codes or 'class-ordering' in codes
+            return any(kind in _kinds_for(code) for code in codes)
     return False
 
 
@@ -1665,7 +1809,7 @@ def check_module_ordering(
             if raw_ordering is not None:
                 raw_ordering.append((actual.line, violation_kind))
 
-            if has_ordering_directive(source_lines, actual.line):
+            if has_structural_directive(source_lines, actual.line, violation_kind):
                 continue
 
             # Describe what's wrong
@@ -1725,6 +1869,9 @@ def check_all_defined(
         # Record raw violation for unused-directive detection
         if raw_ordering is not None:
             raw_ordering.append((line, 'missing-all'))
+
+        if has_structural_directive(source_lines, line, 'missing-all'):
+            return []
 
         return [
             OrderingViolation(
@@ -1793,7 +1940,7 @@ def check_all_trailing_comma(
                             # Record raw violation for unused-directive detection
                             if raw_ordering is not None:
                                 raw_ordering.append((node.lineno, 'trailing-comma'))
-                            if has_ordering_directive(source_lines, node.lineno):
+                            if has_structural_directive(source_lines, node.lineno, 'trailing-comma'):
                                 continue
                             violations.append(
                                 OrderingViolation(
@@ -1845,7 +1992,7 @@ def check_class_method_ordering(
                 if raw_ordering is not None:
                     raw_ordering.append((line, 'ordering'))
 
-                if has_ordering_directive(source_lines, line):
+                if has_structural_directive(source_lines, line, 'ordering'):
                     continue
 
                 violations.append(
@@ -1939,10 +2086,14 @@ def find_unused_directives(
         for code in directive.codes:
             # Strategy 1: scope-aware match recorded during checking
             found = (directive.line, code) in matched
-            # Strategy 2: proximity match (inverse of the 4-line forward window)
+            # Strategy 2: proximity match (inverse of the 4-line forward window). The code may be
+            # an umbrella (``ordering`` → its CODE_TO_KINDS family) while raw structural violations
+            # are stored as kinds; ``| {code}`` also covers type directives, whose raw violations are
+            # stored as the code itself (so ``mutable-type`` would miss ``CODE_TO_KINDS['mutable-type']``).
             if not found:
                 found = any(
-                    kind == code and (directive.line - 4) <= lineno <= directive.line for lineno, kind in raw_violations
+                    kind in (_kinds_for(code) | {code}) and (directive.line - 4) <= lineno <= directive.line
+                    for lineno, kind in raw_violations
                 )
             if not found:
                 unused.append(
@@ -2068,12 +2219,18 @@ def format_violation(v: Violation) -> str:
             'mutable': ('Mutable type', 'mutable-type'),
             'loose': ('Loose type', 'loose-typing'),
             'tuple-field': ('Variable-length tuple', 'tuple-field'),
+            'frozenset': ('Concrete immutable type', 'frozenset-constant'),
             'hashable-field': ('Unhashable type', 'hashable-field'),
         }
         type_desc, directive_code = KIND_INFO.get(v.kind, ('Type error', v.kind))
+        # frozenset constants are flagged by annotation OR by value, so avoid the
+        # "in field annotation" phrasing that doesn't fit a bare ``X = frozenset(...)``.
+        if v.kind == 'frozenset':
+            header = f'{v.filepath}:{v.line}:{v.column}: error: frozenset constant — use collections.abc.Set[T] + a set literal'
+        else:
+            header = f"{v.filepath}:{v.line}:{v.column}: error: {type_desc} '{v.bad_type}' in {v.context} annotation"
         return (
-            f'{v.filepath}:{v.line}:{v.column}: error: '
-            f"{type_desc} '{v.bad_type}' in {v.context} annotation\n"
+            f'{header}\n'
             f'    {v.source_line}\n'
             f'    Suggestion: {v.suggestion}\n'
             f'    Silence with: {DIRECTIVE_PREFIX} {directive_code}'

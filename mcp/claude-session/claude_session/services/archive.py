@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
@@ -44,6 +44,8 @@ from claude_session.services.artifacts import (
     collect_task_metadata,
     collect_todos,
     collect_tool_results,
+    collect_workflow_journals,
+    collect_workflow_runs,
     detect_agent_structure,
     extract_custom_title_from_records,
     extract_slugs_from_records,
@@ -71,7 +73,7 @@ logger = logging.getLogger(__name__)
 class FormatDetector:
     """Detects and validates archive format from file extension and format parameter."""
 
-    SUPPORTED_FORMATS: ClassVar[frozenset[str]] = frozenset({'json', 'zst'})  # 'zst' = JSON with zstd compression
+    SUPPORTED_FORMATS: ClassVar[Set[str]] = {'json', 'zst'}  # 'zst' = JSON with zstd compression
 
     # Extension to format mapping
     EXTENSION_MAP: ClassVar[Mapping[str, ArchiveFormat]] = {
@@ -333,30 +335,45 @@ class SessionArchiveService:
                 continue
 
             agent_id, agent_type = parse_agent_metadata(file_path.name)
-            nested = detect_agent_structure(file_path, self.session_id, project_folder)
+            structure = detect_agent_structure(file_path, self.session_id, project_folder)
             records = files_data.get(file_path.name, [])
 
             agent_entries.append(
                 AgentFileEntry(
                     agent_id=agent_id,
                     agent_type=agent_type,
-                    nested=nested,
+                    nested=structure.nested,
+                    workflow_subpath=structure.workflow_subpath,
                     record_count=len(records),
                     records=records,
                 )
             )
 
-        # Agent metadata sidecars (paired with agent_files when present)
+        # Agent metadata sidecars (paired with agent_files when present). The relpath key
+        # carries any workflows/wf_<runId>/ nesting so restore places each beside its transcript.
         agent_metadata_files = collect_agent_metadata(project_folder, self.session_id)
-        agent_metadata_entries = [
-            AgentMetadataEntry(
-                agent_id=filename.removeprefix('agent-').removesuffix('.meta.json'),
-                content=content,
+        agent_metadata_entries: list[AgentMetadataEntry] = []
+        for relpath, content in agent_metadata_files.items():
+            subpath, _, filename = relpath.rpartition('/')
+            agent_metadata_entries.append(
+                AgentMetadataEntry(
+                    agent_id=filename.removeprefix('agent-').removesuffix('.meta.json'),
+                    workflow_subpath=subpath or None,
+                    content=content,
+                )
             )
-            for filename, content in agent_metadata_files.items()
-        ]
         if agent_metadata_entries:
             logger.info('Collected %d agent metadata sidecars', len(agent_metadata_entries))
+
+        # Workflow run-journals (carried verbatim; relpath key preserves the wf_<runId> nesting)
+        workflow_journals = collect_workflow_journals(project_folder, self.session_id)
+        if workflow_journals:
+            logger.info('Collected %d workflow run-journals', len(workflow_journals))
+
+        # Workflow run metadata + scripts under <session>/workflows/ (carried verbatim)
+        workflow_runs = collect_workflow_runs(project_folder, self.session_id)
+        if workflow_runs:
+            logger.info('Collected %d workflow run files', len(workflow_runs))
 
         # Convert artifacts to v2 entry models
         plan_entries = [PlanFileEntry(slug=slug, content=content) for slug, content in plan_files.items()]
@@ -410,6 +427,8 @@ class SessionArchiveService:
             main_session=main_session,
             agent_files=agent_entries,
             agent_metadata=agent_metadata_entries,
+            workflow_journals=workflow_journals,
+            workflow_runs=workflow_runs,
             plan_files=plan_entries,
             tool_results=tool_result_entries,
             tool_result_dirs=tool_result_dir_entries,

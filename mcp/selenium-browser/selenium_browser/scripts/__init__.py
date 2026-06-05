@@ -19,6 +19,7 @@ __all__ = [
     'INDEXEDDB_RESTORE_SCRIPT',
     'NETWORK_MONITOR_CHECK_SCRIPT',
     'NETWORK_MONITOR_SETUP_SCRIPT',
+    'REQUEST_LOG_INSTALL_SCRIPT',
     'RESOURCE_TIMING_SCRIPT',
     'RESPONSE_BODY_CAPTURE_SCRIPT',
     'SAFE_SERIALIZE_SCRIPT',
@@ -77,6 +78,7 @@ SAFE_SERIALIZE_SCRIPT: str = _load_script('safe_serialize.js')
 INDEXEDDB_CAPTURE_SCRIPT: str = _load_script('indexeddb_capture.js')
 INDEXEDDB_RESTORE_SCRIPT: str = _load_script('indexeddb_restore.js')
 RESPONSE_BODY_CAPTURE_SCRIPT: str = _load_script('response_body_capture.js')
+REQUEST_LOG_INSTALL_SCRIPT: str = _load_script('request_log.js')
 SMOOTH_SCROLL_SCRIPT: str = _load_script('smooth_scroll.js')
 HOVER_STABILITY_SCRIPT: str = _load_script('hover_stability.js')
 HOVER_OCCLUSION_SCRIPT: str = _load_script('hover_occlusion.js')

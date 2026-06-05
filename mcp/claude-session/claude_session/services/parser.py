@@ -10,6 +10,9 @@ import logging
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+import pydantic
+
+from claude_session.exceptions import SessionRecordError
 from claude_session.schemas.session import SessionRecord
 from claude_session.schemas.session.models import validate_session_record
 
@@ -61,7 +64,7 @@ class SessionParserService:
         records = []
 
         with open(file_path, encoding='utf-8') as f:
-            for _line_num, line in enumerate(f, 1):
+            for line_num, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
@@ -69,8 +72,12 @@ class SessionParserService:
                 # Parse JSON (fail fast on error)
                 raw_data = json.loads(line)
 
-                # Validate with type-dispatch (fast path, better error messages)
-                record = validate_session_record(raw_data)
+                # Validate with type-dispatch. Under strict mode a record newer than the
+                # schema raises here; surface it with file+line+type, not a raw pydantic dump.
+                try:
+                    record = validate_session_record(raw_data)
+                except pydantic.ValidationError as exc:
+                    raise SessionRecordError(file_path, line_num, raw_data.get('type')) from exc
                 records.append(record)
 
         return records

@@ -17,7 +17,7 @@ import sqlite3
 import time
 from collections.abc import Mapping, Sequence
 
-from thefuzz import fuzz  # type: ignore[import-untyped]  # no py.typed marker, stubs unpublished
+import thefuzz.fuzz
 
 from imessage_kit.types import Contact, ContactMatchMode, ContactSource
 
@@ -39,7 +39,7 @@ class ContactResolver:
     # 1.0 (used inline) is a perfect match; 0.0 is no match.
     SCORE_EXACT_NAME_PART = 0.95  # first OR last name exactly equals the query
     SCORE_SUBSTRING_IN_NAME = 0.85  # query appears as a substring in the full name
-    FUZZY_MATCH_MIN_RATIO = 70  # fuzz.token_sort_ratio (0-100) floor below which we return no match
+    FUZZY_MATCH_MIN_RATIO = 70  # thefuzz.fuzz.token_sort_ratio (0-100) floor below which we return no match
 
     def __init__(self, sources: Sequence[ContactSource]) -> None:
         self._sources = sources
@@ -228,7 +228,7 @@ class ContactResolver:
             return 0.0
 
         # Layer C — fuzzy token_sort_ratio (only in 'exact_or_substring_or_fuzzy')
-        ratio: int = fuzz.token_sort_ratio(query_lower, name_lower)
+        ratio: int = thefuzz.fuzz.token_sort_ratio(query_lower, name_lower)
         if ratio >= self.FUZZY_MATCH_MIN_RATIO:
             return ratio / 100.0
 
