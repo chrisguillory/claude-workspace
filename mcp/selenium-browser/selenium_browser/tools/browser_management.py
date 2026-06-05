@@ -156,7 +156,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         return await service.execute_javascript(code=code, timeout_ms=timeout_ms)
 
     @mcp.tool(annotations=ToolAnnotations(title='Take Screenshot', readOnlyHint=True))
-    async def screenshot(filename: str, full_page: bool = False) -> str:
+    async def screenshot(filename: str, full_page: bool = False, trigger_lazy: bool = True) -> str:
         """Capture visual screenshot for verification and debugging.
 
         Use cases:
@@ -168,10 +168,14 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         Args:
             filename: Output filename (e.g., "checkout-page.png")
             full_page: True for entire scrollable page, False for viewport only
+            trigger_lazy: For full_page, scroll the page first so lazy / IntersectionObserver
+                content (Mermaid/math diagrams, lazy images) renders before capture. Default True.
 
         Returns:
             Absolute path to saved screenshot (use Read tool to view)
 
-        Note: Requires vision processing. full_page=True uses CDP Page.captureScreenshot.
+        Note: Requires vision processing. full_page=True scroll-and-stitches viewport tiles —
+              the only way to capture lazy cross-origin iframes (e.g. GitHub Mermaid); trigger_lazy
+              adds a dwell so lazy content renders before each tile is captured.
         """
-        return await service.screenshot(filename=filename, full_page=full_page)
+        return await service.screenshot(filename=filename, full_page=full_page, trigger_lazy=trigger_lazy)

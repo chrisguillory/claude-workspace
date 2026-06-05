@@ -2678,7 +2678,7 @@ wheels = [
 
 [[package]]
 name = "selenium-browser"
-version = "0.9.1"
+version = "0.10.0"
 source = { editable = "mcp/selenium-browser" }
 dependencies = [
     { name = "cc-lib" },
@@ -2687,6 +2687,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "fastmcp" },
     { name = "httpx" },
+    { name = "pillow" },
     { name = "pycryptodome" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -2702,6 +2703,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.124.0" },
     { name = "fastmcp", specifier = ">=2.12.5" },
     { name = "httpx" },
+    { name = "pillow", specifier = ">=12.2.0" },
     { name = "pycryptodome", specifier = ">=3.23.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pyyaml" },

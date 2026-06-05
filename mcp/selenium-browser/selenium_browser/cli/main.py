@@ -170,10 +170,17 @@ def wait_for_network_idle(
 def screenshot(
     filename: Annotated[str, typer.Argument(help='Output filename.')],
     full_page: Annotated[bool, typer.Option('--full-page', help='Capture full scrollable page.')] = False,
+    trigger_lazy: Annotated[
+        bool,
+        typer.Option(
+            '--trigger-lazy/--no-trigger-lazy',
+            help='For --full-page, scroll first so lazy content (Mermaid/math, lazy images) renders before capture.',
+        ),
+    ] = True,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Take a screenshot."""
-    result = _call_tool('screenshot', filename=filename, full_page=full_page)
+    result = _call_tool('screenshot', filename=filename, full_page=full_page, trigger_lazy=trigger_lazy)
     _print_result(result, format)
 
 
