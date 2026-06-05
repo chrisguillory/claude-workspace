@@ -41,6 +41,7 @@ from document_search.schemas.vectors import (
     SearchResult,
     SearchType,
 )
+from document_search.search_config import MAX_SEARCH_RESULTS, clamp_search_limit, format_snippet, rerank_candidate_count
 from document_search.search_path import (
     ResolvedPaths,
     resolve_filter_paths,
@@ -337,13 +338,19 @@ def search(
             help='Path scope. Default: current directory. Repeat -p to scope multiple paths. Each path must exist on disk. Use "**" alone for global; globs are not supported.',
         ),
     ] = ['.'],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
-    limit: Annotated[int, typer.Option('--limit', '-n', help='Max results.')] = 10,
+    limit: Annotated[int, typer.Option('--limit', '-n', help=f'Max results (capped at {MAX_SEARCH_RESULTS}).')] = 10,
     search_type: Annotated[SearchType, typer.Option('--type', '-t', help='Search strategy.')] = 'hybrid',
     exclude_paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
         list[str], typer.Option('--exclude', '-x', help='Exclude files under these paths.')
     ] = [],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     min_score: Annotated[
         float | None, typer.Option('--min-score', help='Minimum relevance score (0.0 = relevant).')
+    ] = None,
+    snippet_chars: Annotated[
+        int | None,
+        typer.Option(
+            '--snippet-chars', min=1, help='Truncate each result snippet to N chars (default: full text, matching MCP).'
+        ),
     ] = None,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
@@ -359,7 +366,15 @@ def search(
     """
     asyncio.run(
         _search_async(
-            query, _resolve_collection(collection), paths, limit, search_type, exclude_paths, min_score, format
+            query,
+            _resolve_collection(collection),
+            paths,
+            limit,
+            search_type,
+            exclude_paths,
+            min_score,
+            snippet_chars,
+            format,
         )
     )
 
@@ -414,6 +429,13 @@ def index(
             help='Redis URL query params (passthrough to redis-py). e.g. "socket_timeout=120&socket_connect_timeout=120". Raise on slow hosts where indexing hits Redis timeouts.',
         ),
     ] = None,
+    include_timing: Annotated[
+        bool,
+        typer.Option(
+            '--include-timing/--no-include-timing',
+            help='Include pipeline timing in --format json (default: off, matching the MCP tool).',
+        ),
+    ] = False,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Index documents for search.
@@ -433,6 +455,7 @@ def index(
             chunk_timeout,
             embed_workers,
             redis_url_params,
+            include_timing,
             format,
         ),
     )
@@ -516,15 +539,19 @@ async def _info_async(collection_name: str, paths: Sequence[str], format: Output
         typer.echo(f'  Name: {collection.name}')
         if collection.description:
             typer.echo(f'  Description: {collection.description}')
+        typer.echo(f'  Created: {collection.created_at}')
         typer.echo()
 
         typer.secho('Embedding:', bold=True)
         typer.echo(f'  Provider: {embedding_info.provider}/{embedding_info.model}')
         typer.echo(f'  Dimensions: {embedding_info.dimensions}')
         typer.echo(f'  Batch size: {embedding_info.batch_size}')
+        if embedding_info.requests_per_minute is not None:
+            typer.echo(f'  Requests/min: {embedding_info.requests_per_minute}')
         typer.echo()
 
         typer.secho('Storage:', bold=True)
+        typer.echo(f'  Vector dim: {storage.vector_dimension}')
         typer.echo(f'  Points: {storage.points_count}')
         typer.echo(f'  Status: {storage.status}')
         typer.echo()
@@ -532,9 +559,15 @@ async def _info_async(collection_name: str, paths: Sequence[str], format: Output
         typer.secho('Content:', bold=True)
         typer.echo(f'  Chunks: {content.total_chunks}')
         typer.echo(f'  Files: {content.unique_files}')
+        typer.echo(f'  Supported types: {", ".join(content.supported_types)}')
         if content.by_file_type:
-            typer.echo(f'  Types: {dict(content.by_file_type)}')
+            typer.echo('  Types:')
+            for ftype, count in content.by_file_type.items():
+                typer.echo(f'    {ftype}: {count}')
         typer.echo()
+
+        if info_result.paths:
+            typer.echo(f'Scope: {", ".join(info_result.paths)}')
 
         if dashboard_url:
             typer.secho(f'Dashboard: {dashboard_url}', fg=typer.colors.CYAN)
@@ -572,8 +605,12 @@ async def _list_async(
             typer.echo('No indexed files found.')
             return
 
+        chunk_w = max(len(str(f.chunk_count)) for f in files)
+        type_w = max(len(f.file_type) for f in files)
         for f in files:
-            typer.echo(f'{f.chunk_count:4d} chunks  {f.file_type:<10s}  {f.path}')
+            typer.echo(f'{f.chunk_count:>{chunk_w}d} chunks  {f.file_type:<{type_w}s}  {f.path}')
+        if len(files) == limit:
+            typer.echo(f'(showing first {limit} — pass --limit for more)')
 
 
 async def _clear_async(
@@ -648,6 +685,7 @@ async def _search_async(
     search_type: SearchType,
     exclude_paths: Sequence[str],
     min_score: float | None,
+    snippet_chars: int | None,
     format: OutputFormat,
 ) -> None:
     source_prefixes = to_repo_filter(resolve_search_paths(paths, scope_hint='global scope'))
@@ -701,8 +739,8 @@ async def _search_async(
                 sparse_indices = np_indices.tolist()
                 sparse_values = np_values.tolist()
 
-            effective_limit = min(max(limit, 1), 100)
-            rerank_candidates = min(effective_limit * 3, 200)
+            effective_limit = clamp_search_limit(limit)
+            rerank_candidates = rerank_candidate_count(effective_limit)
 
             search_query = SearchQuery(
                 search_type=search_type,
@@ -735,8 +773,9 @@ async def _search_async(
                 typer.secho(f'  {hit.score:.4f}  {hit.source_path}', bold=True)
                 if hit.heading_context:
                     typer.echo(f'         {hit.heading_context}')
-                snippet = hit.text[:200].replace('\n', ' ')
-                typer.echo(f'         {snippet}')
+                snippet = format_snippet(hit.text, max_chars=snippet_chars)
+                for line in snippet.split('\n'):
+                    typer.echo(f'         {line}')
                 typer.echo()
         finally:
             sparse_service.shutdown()
@@ -756,6 +795,7 @@ async def _index_async(
     chunk_timeout: int | None,
     embed_workers: int | None,
     redis_url_params: str | None,
+    include_timing: bool,
     format: OutputFormat,
 ) -> None:
     resolved_paths = resolve_index_paths([str(p) for p in paths])
@@ -834,6 +874,9 @@ async def _index_async(
                 redis_client=ctx.redis,
                 **index_overrides,
             )
+
+            if not include_timing:
+                result = result.__replace__(timing=None)
 
             if format == 'json':
                 typer.echo(json.dumps(result.model_dump(mode='json'), indent=2, default=str))

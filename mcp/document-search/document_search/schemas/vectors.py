@@ -20,6 +20,7 @@ from document_search.schemas.chunking import Chunk, FileType
 from document_search.schemas.collections import Collection
 from document_search.schemas.config import EmbeddingProvider, default_config
 from document_search.schemas.embeddings import EmbeddingVector
+from document_search.search_config import RERANK_CANDIDATE_CAP
 
 __all__ = [
     'ClearResult',
@@ -122,7 +123,7 @@ class SearchQuery(StrictModel):
     # Sparse vector for keyword matching (required for hybrid/lexical modes)
     sparse_indices: Sequence[int] | None = None
     sparse_values: Sequence[float] | None = None
-    limit: Annotated[int, pydantic.Field(ge=1, le=600)]
+    limit: Annotated[int, pydantic.Field(ge=1, le=RERANK_CANDIDATE_CAP)]
     score_threshold: float | None = None
     # Optional filters
     file_types: Sequence[FileType] | None = None
