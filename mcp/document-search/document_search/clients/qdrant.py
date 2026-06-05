@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TypedDict, cast
 from uuid import UUID
 
@@ -27,6 +27,7 @@ from qdrant_client.http.models import (
     Fusion,
     FusionQuery,
     MatchAny,
+    MatchValue,
     Modifier,
     OptimizersConfigDiff,
     PayloadSchemaType,
@@ -376,6 +377,62 @@ class QdrantClient:
                 **point.payload,
             }
             for point in results
+            if point.payload is not None
+        ]
+
+    async def get_by_chunk_indices(
+        self,
+        collection_name: str,
+        targets: Mapping[str, Collection[int]],
+        *,
+        timeout: int | None = None,
+    ) -> Sequence[SearchResultDict]:
+        """Retrieve chunks by exact ``(source_path, chunk_index)``.
+
+        Fetches the union of ``{source_path: chunk_indices}`` in one scroll via an
+        OR-of-ANDs payload filter (each clause pins one ``source_path`` and matches its
+        requested ``chunk_index`` set). Used to pull neighboring-chunk context for search
+        hits. Returns ``score=0.0`` — these are exact lookups, not similarity matches.
+
+        Indices with no stored chunk (e.g. past a document's last chunk) match nothing
+        and are silently absent — the caller treats missing neighbors as a soft boundary.
+        """
+        clauses = [
+            Filter(
+                must=[
+                    FieldCondition(key='source_path', match=MatchValue(value=source_path)),
+                    FieldCondition(key='chunk_index', match=MatchAny(any=list(chunk_indices))),  # type: ignore[arg-type]  # MatchAny.any union resolves to the str arm; chunk_index is an int payload, Qdrant matches int lists (tested)
+                ]
+            )
+            for source_path, chunk_indices in targets.items()
+        ]
+        if not clauses:
+            return []
+
+        points, _ = await self._client.scroll(
+            collection_name=collection_name,
+            scroll_filter=Filter(should=clauses),
+            limit=sum(len(indices) for indices in targets.values()),
+            with_payload=True,
+            with_vectors=False,
+            timeout=timeout,
+        )
+
+        return [
+            SearchResultDict(
+                id=str(point.id),
+                score=0.0,
+                source_path=point.payload['source_path'],
+                chunk_index=point.payload['chunk_index'],
+                file_type=point.payload['file_type'],
+                text=point.payload['text'],
+                start_char=point.payload['start_char'],
+                end_char=point.payload['end_char'],
+                heading_context=point.payload.get('heading_context'),
+                page_number=point.payload.get('page_number'),
+                json_path=point.payload.get('json_path'),
+            )
+            for point in points
             if point.payload is not None
         ]
 

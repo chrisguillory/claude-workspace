@@ -32,7 +32,7 @@ from document_search.schemas.vectors import (
     StorageStats,
     VectorPoint,
 )
-from document_search.search_config import PATH_FILTER_OVERFETCH_FACTOR
+from document_search.search_config import PATH_FILTER_OVERFETCH_FACTOR, neighbor_chunk_targets
 
 __all__ = [
     'DocumentVectorRepository',
@@ -178,6 +178,66 @@ class DocumentVectorRepository:
         ]
 
         return SearchResult(hits=hits, total=len(hits))
+
+    async def fetch_neighbors(
+        self,
+        hits: Sequence[SearchHit],
+        *,
+        before: int,
+        after: int,
+        search_timeout: int | None = None,
+    ) -> Sequence[SearchHit]:
+        """Attach neighboring-chunk context to each hit (``grep``-style ``-B``/``-A``).
+
+        Fetches the chunks ``before`` positions before and ``after`` positions after each
+        hit's ``chunk_index`` in the same document, in a single batched Qdrant lookup
+        (deduped across overlapping windows), and returns the hits with ``before``/``after``
+        populated. Input order is preserved; neighbor lists are ordered by ``chunk_index``.
+
+        Document boundaries are soft: a neighbor index below 0 or past a document's last
+        chunk yields no chunk and is simply absent. Chunks that are themselves hits are
+        never duplicated as context. ``before == after == 0`` returns the hits unchanged.
+        """
+        if not hits or (before == 0 and after == 0):
+            return hits
+
+        hit_positions = [(hit.source_path, hit.chunk_index) for hit in hits]
+        targets = neighbor_chunk_targets(hit_positions, before=before, after=after)
+
+        raw_neighbors = await self._client.get_by_chunk_indices(self._collection_name, targets, timeout=search_timeout)
+        neighbor_by_position: dict[tuple[str, int], SearchHit] = {
+            (result['source_path'], result['chunk_index']): SearchHit(
+                id=UUID(result['id']),
+                score=result['score'],
+                source_path=result['source_path'],
+                chunk_index=result['chunk_index'],
+                file_type=typing.cast(FileType, result['file_type']),
+                text=result['text'],
+                start_char=result['start_char'],
+                end_char=result['end_char'],
+                heading_context=result.get('heading_context'),
+                page_number=result.get('page_number'),
+                json_path=result.get('json_path'),
+            )
+            for result in raw_neighbors
+        }
+
+        def window(source_path: str, indices: range) -> Sequence[SearchHit]:
+            return [
+                neighbor_by_position[(source_path, idx)]
+                for idx in indices
+                if (source_path, idx) in neighbor_by_position
+            ]
+
+        return [
+            hit.model_copy(
+                update={
+                    'before': window(hit.source_path, range(hit.chunk_index - before, hit.chunk_index)),
+                    'after': window(hit.source_path, range(hit.chunk_index + 1, hit.chunk_index + after + 1)),
+                }
+            )
+            for hit in hits
+        ]
 
     async def get(self, point_ids: Sequence[UUID]) -> Sequence[SearchHit]:
         """Retrieve documents by ID.

@@ -132,7 +132,14 @@ class SearchQuery(StrictModel):
 
 
 class SearchHit(StrictModel):
-    """A single search result with score and chunk data."""
+    """A single search result with score and chunk data.
+
+    ``before``/``after`` carry neighboring-chunk context (``grep -B``/``-A``): the chunks
+    immediately preceding/following this hit in the same document, ordered by
+    ``chunk_index``. They are populated only when context is requested, are not reranked
+    (their ``score`` is ``0.0``), and do not count against the result ``limit``. Empty by
+    default and on direct retrieval.
+    """
 
     id: UUID
     score: float
@@ -145,6 +152,8 @@ class SearchHit(StrictModel):
     heading_context: str | None = None
     page_number: int | None = None
     json_path: str | None = None
+    before: Sequence[SearchHit] = ()
+    after: Sequence[SearchHit] = ()
 
 
 class SearchResult(StrictModel):
