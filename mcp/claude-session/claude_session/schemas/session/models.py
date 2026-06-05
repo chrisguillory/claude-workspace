@@ -308,6 +308,10 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   TaskCreate TODO system). SessionModeRecord.mode + IsolationLatchRecord.side gained
                   'coordinator' (binary isCoordinatorMode projection; previously empirical-only-
                   deferred). Extended CLAUDE_CODE_MAX_VERSION to 2.1.163.
+- Schema v0.2.43: NetworkDownError.connection -> nullable. The request-diagnostic api_error
+                  envelope (formatted + isNetworkDown, no status) also carries request-timeouts
+                  ({connection: null, isNetworkDown: false}); the binary's VU(H) connection builder
+                  returns null when there is no socket-level failure. MAX unchanged (2.1.163).
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -658,7 +662,7 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.42'
+SCHEMA_VERSION = '0.2.43'
 CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
 CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.163')
 
@@ -1904,15 +1908,18 @@ class NetworkDownConnection(StrictModel):
 
 
 class NetworkDownError(StrictModel):
-    """Network-down api_error variant (Claude Code 2.1.161+).
+    """Request-diagnostic api_error envelope (Claude Code 2.1.161+).
 
-    Distinct from ApiError (status/headers), NetworkError (cause), and EmptyError
-    (null-type-only): identified by required formatted + connection + isNetworkDown.
+    Covers network-down (connection = NetworkDownConnection, isNetworkDown true) and
+    request-timeout (connection null, isNetworkDown false) -- the binary builds connection
+    via ``VU(H)``, which returns null when there is no socket-level failure. Distinct from
+    ApiError (status/headers), NetworkError (cause), EmptyError (null-type-only), and
+    RetryableHttpError (has status): identified by formatted + isNetworkDown, no status.
     """
 
     message: str
     formatted: str
-    connection: NetworkDownConnection
+    connection: NetworkDownConnection | None  # null on timeouts (no socket-level failure)
     isNetworkDown: bool
     rateLimits: None = None  # null in this variant
 
