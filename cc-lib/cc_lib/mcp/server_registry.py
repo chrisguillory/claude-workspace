@@ -14,7 +14,6 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import pydantic
 from mcp.server.fastmcp import FastMCP
 
 from cc_lib import os_process
@@ -41,10 +40,6 @@ class McpServerInfo(ClosedModel):
     mcp_pid: int
     """The MCP server process's own PID."""
 
-    created_at: JsonDatetime
-    """The MCP process's create_time, paired with ``mcp_pid`` as a recycle-safe liveness
-    anchor (``os_process.ProcessHandle``): a reused PID with a drifted create_time reads as dead."""
-
     claude_pid: int
     """The parent Claude Code process PID."""
 
@@ -53,6 +48,10 @@ class McpServerInfo(ClosedModel):
 
     claude_version: CCVersion
     """Claude Code version, e.g. ``'2.1.138'``."""
+
+    created_at: JsonDatetime
+    """The MCP process's create_time, paired with ``mcp_pid`` as a recycle-safe liveness
+    anchor (``os_process.ProcessHandle``): a reused PID with a drifted create_time reads as dead."""
 
     sock_path: str | None = None
     """UDS socket path, set when the server runs a bridge."""
@@ -110,10 +109,7 @@ def find_one(session_id: str, name: str) -> McpServerInfo | None:
     if not registry_dir.is_dir():
         return None
     for entry_path in sorted(registry_dir.glob(f'{name}-*.json'), key=_pid_from_entry_path):
-        try:
-            info = McpServerInfo.model_validate_json(entry_path.read_bytes())
-        except (OSError, pydantic.ValidationError):
-            continue
+        info = McpServerInfo.model_validate_json(entry_path.read_bytes())
         if ProcessHandle(info.mcp_pid, info.created_at).is_alive():
             return info
     return None
@@ -143,10 +139,7 @@ def read_all(session_id: str) -> Sequence[McpServerInfo]:
         return []
     live: list[McpServerInfo] = []
     for entry in sorted(registry_dir.glob('*.json')):
-        try:
-            info = McpServerInfo.model_validate_json(entry.read_bytes())
-        except (OSError, pydantic.ValidationError):
-            continue
+        info = McpServerInfo.model_validate_json(entry.read_bytes())
         if ProcessHandle(info.mcp_pid, info.created_at).is_alive():
             live.append(info)
     return live

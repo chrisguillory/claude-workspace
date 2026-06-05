@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-__all__ = ['PROJECT']
+__all__ = [
+    'PROJECT',
+]
 
 from cc_lib.project import Project
 

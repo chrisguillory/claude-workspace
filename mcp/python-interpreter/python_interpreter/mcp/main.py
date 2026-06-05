@@ -28,9 +28,7 @@ import fastapi
 import mcp.server.fastmcp
 import mcp.types
 from cc_lib.logging_setup import configure_logging
-from cc_lib.mcp.server_registry import register_self
-from cc_lib.mcp.socket_name import get_socket_path
-from cc_lib.mcp.uds_bridge import start_uds_bridge
+from cc_lib.mcp import get_socket_path, register_self, start_uds_bridge
 
 from python_interpreter import PROJECT
 from python_interpreter.models import ExecuteRequest, InterpreterInfo
@@ -227,6 +225,7 @@ async def lifespan(
             print(f'  Output directory: {state.output_dir}', file=sys.stderr)
             print(f'  Unix socket: {socket_path}', file=sys.stderr)
             yield
+
     finally:
         print('Shutting down interpreters...', file=sys.stderr)
         state.interpreter_manager.shutdown_all()

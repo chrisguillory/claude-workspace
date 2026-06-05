@@ -62,8 +62,8 @@ class SessionContext(StrictModel):
 
     # Environment (only populated for current session via MCP, None for CLI queries)
     machine_id: str | None  # user@hostname identifier
-    claude_pid: int | None  # Claude Code process ID (parent of mcp_pid)
     mcp_pid: int | None  # claude-session MCP server's own PID (child of claude_pid; None for CLI queries)
+    claude_pid: int | None  # Claude Code process ID (parent of mcp_pid)
     claude_version: CCVersion | None  # Claude Code CLI version (e.g., "2.1.12")
     temp_dir: str | None  # MCP server's temp directory
 

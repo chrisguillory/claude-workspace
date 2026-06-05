@@ -40,13 +40,6 @@ class TestRegistry:
         async with register(recycled):
             assert list(read_all(recycled.session_id)) == []
 
-    async def test_skips_corrupt_file(self, info: McpServerInfo, workspace_dir: Path) -> None:
-        registry_dir = workspace_dir / 'mcp' / 'registry' / info.session_id
-        registry_dir.mkdir(parents=True)
-        (registry_dir / 'corrupt-1.json').write_text('not valid json')
-        async with register(info):
-            assert list(read_all(info.session_id)) == [info]
-
     async def test_register_cleans_up_on_exit(self, info: McpServerInfo, workspace_dir: Path) -> None:
         """File written on enter, removed on exit. The CM contract."""
         path = workspace_dir / 'mcp' / 'registry' / info.session_id / f'{info.name}-{info.mcp_pid}.json'

@@ -56,8 +56,8 @@ class CurrentSessionContext:
 
     session_id: str
     project_path: Path
-    claude_pid: int  # Parent Claude Code process PID
     mcp_pid: int  # This MCP server's own PID (always a child of claude_pid for current session)
+    claude_pid: int  # Parent Claude Code process PID
     temp_dir: str
 
     def matches(self, session_id: str, session_folder: Path) -> bool:
@@ -141,18 +141,17 @@ class SessionInfoService:
         # - claude_pid: Current session has live PID; other sessions have historical PID from sessions.json
         # - machine_id: If session is in sessions.json, it's on this machine, so we can compute it
         if is_current and current_context is not None:
-            claude_pid: int | None = current_context.claude_pid
-            temp_dir: str | None = current_context.temp_dir
-            machine_id: str | None = get_machine_id()
             mcp_pid: int | None = current_context.mcp_pid
+            claude_pid: int | None = current_context.claude_pid
+            machine_id: str | None = get_machine_id()
+            temp_dir: str | None = current_context.temp_dir
         else:
-            # For non-current sessions, get historical PID from sessions.json if available
-            claude_pid = workspace_session.metadata.claude_pid if workspace_session else None
-            temp_dir = None  # Only available for current session
-            # If session is in sessions.json, it was created on this machine
-            machine_id = get_machine_id() if workspace_session else None
+            # CLI path: mcp_pid from the live registry; the rest historical from sessions.json.
             entry = find_one(full_session_id, PROJECT.name) if workspace_session else None
             mcp_pid = entry.mcp_pid if entry is not None else None
+            claude_pid = workspace_session.metadata.claude_pid if workspace_session else None
+            machine_id = get_machine_id() if workspace_session else None
+            temp_dir = None  # Only available for current session
 
         claude_version = await self._get_claude_version(
             session_file=session_file,
@@ -180,8 +179,8 @@ class SessionInfoService:
             debug_file=str(debug_file),
             # Environment
             machine_id=machine_id,
-            claude_pid=claude_pid,
             mcp_pid=mcp_pid,
+            claude_pid=claude_pid,
             claude_version=claude_version,
             temp_dir=temp_dir,
             # Origin
