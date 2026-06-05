@@ -102,8 +102,9 @@ async def register_self(
 def find_one(session_id: str, name: str) -> McpServerInfo | None:
     """Return the live MCP server entry for ``(session_id, name)``, if any.
 
-    Short-circuits on the first live match; dead-PID entries with the same
-    name are skipped.
+    Scans by ascending ``mcp_pid`` and returns the first whose process is
+    alive — so among same-named siblings (parent + subagent-isolated) the
+    earliest-started wins. Entries whose process has exited are skipped.
     """
     registry_dir = _session_dir(session_id)
     if not registry_dir.is_dir():
@@ -130,9 +131,10 @@ def find_live_sock_path(name: str) -> Path | None:
 
 
 def read_all(session_id: str) -> Sequence[McpServerInfo]:
-    """Return the MCP servers registered for a session whose PID is alive.
+    """Return the MCP servers registered for a session whose process is alive.
 
-    Entries with a dead PID (crashed server, stale file) are skipped.
+    Entries whose process has exited (graceful-exit cleanup missed, or SIGKILL)
+    are skipped via the recycle-safe ``ProcessHandle`` check.
     """
     registry_dir = _session_dir(session_id)
     if not registry_dir.is_dir():
