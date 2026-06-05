@@ -340,6 +340,10 @@ def search(
     ] = ['.'],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
     limit: Annotated[int, typer.Option('--limit', '-n', help=f'Max results (capped at {MAX_SEARCH_RESULTS}).')] = 10,
     search_type: Annotated[SearchType, typer.Option('--type', '-t', help='Search strategy.')] = 'hybrid',
+    file_types: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
+        list[FileType] | None,
+        typer.Option('--file-type', help='Filter by file type (repeat for multiple). Default: all types.'),
+    ] = None,
     exclude_paths: Annotated[  # strict_typing_linter.py: mutable-type — typer requires list
         list[str], typer.Option('--exclude', '-x', help='Exclude files under these paths.')
     ] = [],  # noqa: B006 — typer reads default at decoration; not a per-call shared mutable
@@ -350,6 +354,13 @@ def search(
         int | None,
         typer.Option(
             '--snippet-chars', min=1, help='Truncate each result snippet to N chars (default: full text, matching MCP).'
+        ),
+    ] = None,
+    search_timeout: Annotated[
+        int | None,
+        typer.Option(
+            '--search-timeout',
+            help="Qdrant search timeout in seconds. Raise for large path='**' searches. Default: client setting.",
         ),
     ] = None,
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
@@ -363,6 +374,7 @@ def search(
         document-search search "error handling" --limit 5 -f json
         document-search search "config" --exclude /path/to/noise/
         document-search search "retry logic" --min-score 0.0
+        document-search search "deploy steps" --file-type markdown
     """
     asyncio.run(
         _search_async(
@@ -371,9 +383,11 @@ def search(
             paths,
             limit,
             search_type,
+            file_types,
             exclude_paths,
             min_score,
             snippet_chars,
+            search_timeout,
             format,
         )
     )
@@ -683,9 +697,11 @@ async def _search_async(
     paths: Sequence[str],
     limit: int,
     search_type: SearchType,
+    file_types: Sequence[FileType] | None,
     exclude_paths: Sequence[str],
     min_score: float | None,
     snippet_chars: int | None,
+    search_timeout: int | None,
     format: OutputFormat,
 ) -> None:
     source_prefixes = to_repo_filter(resolve_search_paths(paths, scope_hint='global scope'))
@@ -748,11 +764,12 @@ async def _search_async(
                 sparse_indices=sparse_indices,
                 sparse_values=sparse_values,
                 limit=rerank_candidates,
+                file_types=file_types,
                 source_path_prefixes=source_prefixes,
                 exclude_path_prefixes=resolved_excludes,
             )
 
-            result = await repository.search(search_query)
+            result = await repository.search(search_query, search_timeout=search_timeout)
             result = await reranker.rerank(query=query, result=result, top_k=effective_limit)
 
             if min_score is not None:
