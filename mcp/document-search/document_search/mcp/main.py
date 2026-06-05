@@ -453,9 +453,7 @@ Returns:
 
         if snippet_chars is not None:
             result = SearchResult(
-                hits=[
-                    h.model_copy(update={'text': format_snippet(h.text, max_chars=snippet_chars)}) for h in result.hits
-                ],
+                hits=[h.__replace__(text=format_snippet(h.text, max_chars=snippet_chars)) for h in result.hits],
                 total=result.total,
             )
 

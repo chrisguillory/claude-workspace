@@ -202,6 +202,9 @@ filterwarnings = [
 [tool.reexport-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
 
+[tool.replace-linter.per-file-ignores]
+"tests/linters/edge_cases/**" = ["skip-file"]
+
 [tool.suppression-rationale-linter.per-file-ignores]
 "tests/linters/edge_cases/**" = ["skip-file"]
 

@@ -60,6 +60,14 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: replace-linter
+        name: replace-linter
+        description: Steer model_copy(update=...) to the typed __replace__()
+        entry: ./linters/replace_linter.py --report-unused-directives .
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: ruff
         name: ruff
         description: Run ruff linter with auto-fix

@@ -721,17 +721,15 @@ class SessionDeleteService:
             for d in manifest.directories_to_cleanup
             if not any(Path(d).is_relative_to(root) for root in cross_session_roots)
         ]
-        return manifest.model_copy(
-            update={
-                'files': kept_files,
-                'total_size_bytes': sum(a.size_bytes for a in kept_files),
-                'plan_files': [],
-                'todo_files': [],
-                'task_files': [],
-                'session_env_files': [],
-                'debug_log_files': [],
-                'directories_to_cleanup': kept_dirs,
-            }
+        return manifest.__replace__(
+            files=kept_files,
+            total_size_bytes=sum(a.size_bytes for a in kept_files),
+            plan_files=[],
+            todo_files=[],
+            task_files=[],
+            session_env_files=[],
+            debug_log_files=[],
+            directories_to_cleanup=kept_dirs,
         )
 
     @asynccontextmanager
