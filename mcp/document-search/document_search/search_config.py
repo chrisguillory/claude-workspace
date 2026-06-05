@@ -124,10 +124,8 @@ def snippet_hit(hit: SearchHit, max_chars: int | None) -> SearchHit:
     each ``before``/``after`` neighbor, so context chunks render at the same width as the
     hit. ``None`` leaves all text full.
     """
-    return hit.model_copy(
-        update={
-            'text': format_snippet(hit.text, max_chars=max_chars),
-            'before': [snippet_hit(n, max_chars) for n in hit.before],
-            'after': [snippet_hit(n, max_chars) for n in hit.after],
-        }
+    return hit.__replace__(
+        text=format_snippet(hit.text, max_chars=max_chars),
+        before=[snippet_hit(n, max_chars) for n in hit.before],
+        after=[snippet_hit(n, max_chars) for n in hit.after],
     )

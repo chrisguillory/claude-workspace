@@ -230,11 +230,9 @@ class DocumentVectorRepository:
             ]
 
         return [
-            hit.model_copy(
-                update={
-                    'before': window(hit.source_path, range(hit.chunk_index - before, hit.chunk_index)),
-                    'after': window(hit.source_path, range(hit.chunk_index + 1, hit.chunk_index + after + 1)),
-                }
+            hit.__replace__(
+                before=window(hit.source_path, range(hit.chunk_index - before, hit.chunk_index)),
+                after=window(hit.source_path, range(hit.chunk_index + 1, hit.chunk_index + after + 1)),
             )
             for hit in hits
         ]
