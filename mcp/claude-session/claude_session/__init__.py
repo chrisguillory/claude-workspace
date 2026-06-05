@@ -6,4 +6,4 @@ __all__ = ['PROJECT']
 
 from cc_lib.project import Project
 
-PROJECT = Project(name='claude-session')
+PROJECT = Project.from_pyproject(__file__)
