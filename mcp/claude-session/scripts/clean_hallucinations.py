@@ -6,8 +6,8 @@ correct field/type; the model emitted a malformed tool arg). The fix is the data
 schema. Two patterns:
 
   - TaskUpdate input ``id`` -> ``taskId`` (the binary schema uses taskId).
-  - Stringized dash-flags: ``-n``/``-i``/``-r``/``-o`` "true"/"false" -> bool;
-    ``-A``/``-B``/``-C`` "<n>" -> int (the binary schema types these bool/int).
+  - Stringized bool/int tool params -> their type: bool params ``-n``/``-i``/``-r``/``-o``,
+    ``block`` (TaskOutput); int params ``-A``/``-B``/``-C``, ``head_limit`` (Grep).
 
 Two phases, so nothing is auto-edited:
 
@@ -33,13 +33,14 @@ import shutil
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, get_args
 
 import pydantic
+from claude_session.schemas.session import models as cc_models
 from claude_session.schemas.session.models import validate_session_record
 
-_BOOL_FLAGS = {'-n', '-i', '-r', '-o'}
-_INT_FLAGS = {'-A', '-B', '-C'}
+# The one repair the schema can't derive: a field NAME the model got wrong (not a type).
+_RENAMES = {'TaskUpdate': {'id': 'taskId'}}
 
 
 class Finding(NamedTuple):
@@ -56,19 +57,53 @@ def _short_hash(line: str) -> str:
     return hashlib.sha256(line.encode()).hexdigest()[:7]
 
 
+def _scalar_type(annotation: Any) -> type | None:
+    """If an annotation is purely ``bool`` or ``int`` (modulo ``None``), return it, else None."""
+    args = [a for a in get_args(annotation) if a is not type(None)]
+    base = args[0] if len(args) == 1 else (annotation if not args else None)
+    return base if base in (bool, int) else None
+
+
+def _typed_params(name: str | None) -> Mapping[str, type]:
+    """Map a tool's JSON input keys to ``bool``/``int``, read from its ``{Tool}ToolInput`` model.
+
+    Schema-driven: the bool/int fields come from the typed model itself, so a newly stringized
+    param is coerced with no change here -- the structure is the source of truth, not a list.
+    """
+    fields = getattr(getattr(cc_models, f'{name}ToolInput', None), 'model_fields', None)
+    if not isinstance(fields, dict):
+        return {}
+    typed: dict[str, type] = {}
+    for fname, finfo in fields.items():
+        base = _scalar_type(finfo.annotation)
+        if base is not None:
+            typed[finfo.alias or fname] = base
+    return typed
+
+
 def _fixed_input(name: str | None, inp: Mapping[str, Any]) -> tuple[Mapping[str, Any] | None, Sequence[str]]:
-    """Return (repaired copy, fix descriptions), or (None, []) if nothing is fixable."""
+    """Return (repaired copy, fix descriptions), or (None, []) if nothing is fixable.
+
+    Type coercions are schema-driven -- a stringized value is coerced to the type its tool
+    model declares -- so new bool/int params need no change here. The only hard-coded repair
+    is the id->taskId field RENAME, a name mismatch the schema cannot derive.
+    """
     out = dict(inp)
     fixes: list[str] = []
-    if name == 'TaskUpdate' and 'id' in out and 'taskId' not in out:
-        out['taskId'] = out.pop('id')
-        fixes.append('id->taskId')
+    for bad, good in _RENAMES.get(name or '', {}).items():
+        if bad in out and good not in out:
+            out[good] = out.pop(bad)
+            fixes.append(f'{bad}->{good}')
+    typed = _typed_params(name)
     for key in list(out):
         val = out[key]
-        if key in _BOOL_FLAGS and isinstance(val, str) and val in ('true', 'false'):
+        if not isinstance(val, str):
+            continue
+        expected = typed.get(key)
+        if expected is bool and val in ('true', 'false'):
             out[key] = val == 'true'
             fixes.append(f'{key}:"{val}"->bool')
-        elif key in _INT_FLAGS and isinstance(val, str) and val.lstrip('-').isdigit():
+        elif expected is int and val.lstrip('-').isdigit():
             out[key] = int(val)
             fixes.append(f'{key}:"{val}"->int')
     return (out, fixes) if fixes else (None, [])
