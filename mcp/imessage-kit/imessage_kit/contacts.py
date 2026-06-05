@@ -100,7 +100,8 @@ class ContactResolver:
         if source is None:
             haystack: Sequence[Contact] = self._contacts or ()
         else:
-            assert self._per_source_contacts is not None
+            if self._per_source_contacts is None:
+                raise RuntimeError('_ensure_cache() did not populate _per_source_contacts')
             haystack = self._resolve_source(source)
 
         results: list[tuple[float, Contact]] = []
@@ -128,7 +129,8 @@ class ContactResolver:
 
         Raises ValueError if the source does not exist.
         """
-        assert self._per_source_contacts is not None
+        if self._per_source_contacts is None:
+            raise RuntimeError('_ensure_cache() did not populate _per_source_contacts')
         source_lower = source.lower()
         for display_name, contacts in self._per_source_contacts.items():
             if display_name.lower() == source_lower:

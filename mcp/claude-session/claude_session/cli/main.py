@@ -950,7 +950,8 @@ async def _delete_async(
     is_running, running_pid = info_service.is_session_running(full_session_id, session_info.session_folder)
 
     if is_running:
-        assert running_pid is not None  # is_running=True guarantees this
+        if running_pid is None:
+            raise RuntimeError('is_session_running returned is_running=True without a PID')
         if dry_run:
             # Dry-run: show warning but continue
             typer.secho(f'Warning: Session is currently running (PID {running_pid})', fg=typer.colors.YELLOW)
@@ -1055,7 +1056,8 @@ async def _move_async(
     is_running, running_pid = info_service.is_session_running(full_session_id, session_info.session_folder)
 
     if is_running:
-        assert running_pid is not None
+        if running_pid is None:
+            raise RuntimeError('is_session_running returned is_running=True without a PID')
         if dry_run:
             typer.secho(f'Warning: Session is currently running (PID {running_pid})', fg=typer.colors.YELLOW)
         elif not terminate:
