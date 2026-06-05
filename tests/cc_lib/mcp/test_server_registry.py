@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from cc_lib import os_process
 from cc_lib.mcp.server_registry import McpServerInfo, read_all, register
 from cc_lib.types import CCVersion
 
@@ -25,8 +26,19 @@ class TestRegistry:
     async def test_skips_dead_pid(self, info: McpServerInfo, monkeypatch: pytest.MonkeyPatch) -> None:
         """The dispositive read_all behavior — without this, stale entries leak."""
         async with register(info):
-            monkeypatch.setattr('cc_lib.mcp.server_registry.psutil.pid_exists', lambda _pid: False)
+            monkeypatch.setattr('cc_lib.os_process.is_alive', lambda _pid: False)
             assert list(read_all(info.session_id)) == []
+
+    async def test_skips_recycled_pid(self, info: McpServerInfo) -> None:
+        """Recycle-safety: a live PID whose create_time drifted from the anchor reads as dead.
+
+        Hard to stage live (real PID reuse is near-impossible to force), so it earns a
+        regression test. With bare pid_exists this stale entry would survive; the
+        ProcessHandle create_time match is what filters it.
+        """
+        recycled = info.model_copy(update={'created_at': info.created_at - timedelta(hours=1)})
+        async with register(recycled):
+            assert list(read_all(recycled.session_id)) == []
 
     async def test_skips_corrupt_file(self, info: McpServerInfo, workspace_dir: Path) -> None:
         registry_dir = workspace_dir / 'mcp' / 'registry' / info.session_id
@@ -51,7 +63,7 @@ def info() -> McpServerInfo:
         claude_pid=999,
         session_id='test-session-abc',
         claude_version=CCVersion('2.1.138'),
-        started_at=datetime.now(UTC),
+        created_at=os_process.create_time(os.getpid()),
     )
 
 

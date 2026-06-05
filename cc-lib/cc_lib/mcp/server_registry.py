@@ -12,14 +12,14 @@ __all__ = [
 import os
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 
-import psutil
 import pydantic
 from mcp.server.fastmcp import FastMCP
 
+from cc_lib import os_process
 from cc_lib.claude_context import ClaudeContext
+from cc_lib.os_process import ProcessHandle
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.types import CCVersion, JsonDatetime
 from cc_lib.utils import get_claude_workspace_config_home_dir
@@ -41,6 +41,10 @@ class McpServerInfo(ClosedModel):
     mcp_pid: int
     """The MCP server process's own PID."""
 
+    created_at: JsonDatetime
+    """The MCP process's create_time, paired with ``mcp_pid`` as a recycle-safe liveness
+    anchor (``os_process.ProcessHandle``): a reused PID with a drifted create_time reads as dead."""
+
     claude_pid: int
     """The parent Claude Code process PID."""
 
@@ -49,9 +53,6 @@ class McpServerInfo(ClosedModel):
 
     claude_version: CCVersion
     """Claude Code version, e.g. ``'2.1.138'``."""
-
-    started_at: JsonDatetime
-    """When the server registered."""
 
     sock_path: str | None = None
     """UDS socket path, set when the server runs a bridge."""
@@ -84,13 +85,14 @@ async def register_self(
     Reads identity from ``server.name`` (the FastMCP protocol-level name) so
     each MCP declares its name in one place: the ``FastMCP(...)`` constructor.
     """
+    pid = os.getpid()
     info = McpServerInfo(
         name=server.name,
-        mcp_pid=os.getpid(),
+        mcp_pid=pid,
+        created_at=os_process.create_time(pid),
         claude_pid=claude_context.claude_pid,
         session_id=claude_context.session_id,
         claude_version=claude_context.claude_version,
-        started_at=datetime.now(UTC),
         sock_path=sock_path,
         capabilities=tuple(capabilities),
     )
@@ -112,7 +114,7 @@ def find_one(session_id: str, name: str) -> McpServerInfo | None:
             info = McpServerInfo.model_validate_json(entry_path.read_bytes())
         except (OSError, pydantic.ValidationError):
             continue
-        if psutil.pid_exists(info.mcp_pid):
+        if ProcessHandle(info.mcp_pid, info.created_at).is_alive():
             return info
     return None
 
@@ -145,7 +147,7 @@ def read_all(session_id: str) -> Sequence[McpServerInfo]:
             info = McpServerInfo.model_validate_json(entry.read_bytes())
         except (OSError, pydantic.ValidationError):
             continue
-        if psutil.pid_exists(info.mcp_pid):
+        if ProcessHandle(info.mcp_pid, info.created_at).is_alive():
             live.append(info)
     return live
 
