@@ -39,6 +39,7 @@ from qdrant_client.http.models import (
 
 from document_search.clients import _retry
 from document_search.schemas.embeddings import EmbeddingVector, SparseIndices, SparseValues
+from document_search.search_config import HYBRID_PREFETCH_FLOOR
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +316,7 @@ class QdrantClient:
                     Prefetch(
                         query=list(dense_vector),
                         using='dense',
-                        limit=50,
+                        limit=max(limit, HYBRID_PREFETCH_FLOOR),
                         filter=query_filter,
                     ),
                     Prefetch(
@@ -324,7 +325,7 @@ class QdrantClient:
                             values=list(sparse_values),
                         ),
                         using='sparse',
-                        limit=50,
+                        limit=max(limit, HYBRID_PREFETCH_FLOOR),
                         filter=query_filter,
                     ),
                 ],

@@ -74,7 +74,7 @@ class RerankerService:
         if top_k is not None:
             reranked_hits = reranked_hits[:top_k]
 
-        return SearchResult(hits=reranked_hits, total=result.total)
+        return SearchResult(hits=reranked_hits, total=len(reranked_hits))
 
 
 def _wipe_model_cache(model_name: str) -> None:
