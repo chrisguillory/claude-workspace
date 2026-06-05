@@ -34,7 +34,7 @@ import shutil
 from collections.abc import Iterator, Mapping, Sequence, Set
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, get_args
+from typing import Any, get_args
 
 import pydantic
 from cc_lib.error_boundary import ErrorBoundary
@@ -45,6 +45,9 @@ from claude_session.schemas.session.models import validate_session_record
 type JsonRecord = Mapping[str, Any]  # a raw JSON-parsed record or tool input
 
 error_boundary = ErrorBoundary(exit_code=1)
+
+# The one repair the schema can't derive: a field NAME the model got wrong (not a type).
+RENAMES: Mapping[str, Mapping[str, str]] = {'TaskUpdate': {'id': 'taskId'}}
 
 
 class Finding(ClosedModel):
@@ -65,8 +68,6 @@ class Cleaner:
     repair logic itself is stateless (class/static methods): it derives bool/int param types
     from each tool model, with ``RENAMES`` the one field-name mismatch the schema can't derive.
     """
-
-    RENAMES: ClassVar[Mapping[str, Mapping[str, str]]] = {'TaskUpdate': {'id': 'taskId'}}
 
     def __init__(self, root: Path, excludes: Sequence[str], backup_root: Path) -> None:
         self.root = root
@@ -166,7 +167,7 @@ class Cleaner:
         """
         out = dict(inp)
         fixes: list[str] = []
-        for bad, good in cls.RENAMES.get(name or '', {}).items():
+        for bad, good in RENAMES.get(name or '', {}).items():
             if bad in out and good not in out:
                 out[good] = out.pop(bad)
                 fixes.append(f'{bad}->{good}')
