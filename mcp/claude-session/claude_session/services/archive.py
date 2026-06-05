@@ -497,7 +497,8 @@ class SessionArchiveService:
         if self._project_folder is not None:
             return self._project_folder
 
-        assert self.project_path is not None  # Ensured by __init__ validation
+        if self.project_path is None:
+            raise RuntimeError('project_path is None despite __init__ validation guaranteeing it')
         encoded_project = encode_project_path(self.project_path)
         folder = self.claude_sessions_dir / encoded_project
 
