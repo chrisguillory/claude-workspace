@@ -133,7 +133,8 @@ def find_live_sock_path(name: str) -> Path | None:
 def read_all(session_id: str) -> Sequence[McpServerInfo]:
     """Return the MCP servers registered for a session whose process is alive.
 
-    Entries whose process has exited (graceful-exit cleanup missed, or SIGKILL)
+    Normal exit unlinks an entry (``register``'s ``finally``), so a surviving
+    entry means the process died abruptly (SIGKILL/crash); such stale entries
     are skipped via the recycle-safe ``ProcessHandle`` check.
     """
     registry_dir = _session_dir(session_id)

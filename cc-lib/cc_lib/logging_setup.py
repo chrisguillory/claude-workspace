@@ -30,7 +30,7 @@ def configure_logging() -> None:
         level=root_level or 'INFO',
         format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
         stream=sys.stderr,
-        force=True,
+        force=True,  # replace any handler a host (MCP server, prior basicConfig) already installed
     )
     for name, level in per_logger.items():
         logging.getLogger(name).setLevel(level)
