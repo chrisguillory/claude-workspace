@@ -337,7 +337,7 @@ Args:
         Use 0.0 for "only relevant results", higher for stricter filtering.
     snippet_chars: Truncate each hit's text to N characters (>= 1), appending an
         ellipsis when truncated. Default returns the full chunk text.
-    search_timeout: Qdrant search timeout in seconds. Increase for large
+    search_timeout: Qdrant search timeout in seconds (>= 1). Increase for large
         unfiltered collections (path="**"). Default uses client setting (30s).
 
 Returns:
@@ -363,7 +363,7 @@ Returns:
         exclude_paths: Sequence[str] = (),
         min_score: float | None = None,
         snippet_chars: typing.Annotated[int, pydantic.Field(ge=1)] | None = None,
-        search_timeout: int | None = None,
+        search_timeout: typing.Annotated[int, pydantic.Field(ge=1)] | None = None,
     ) -> SearchResult:
         path_inputs: Sequence[str] = [path] if isinstance(path, str) else path
         source_prefixes = to_repo_filter(resolve_search_paths(path_inputs, scope_hint='global scope'))

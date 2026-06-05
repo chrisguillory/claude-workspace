@@ -360,6 +360,7 @@ def search(
         int | None,
         typer.Option(
             '--search-timeout',
+            min=1,
             help="Qdrant search timeout in seconds. Raise for large path='**' searches. Default: client setting.",
         ),
     ] = None,
