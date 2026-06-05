@@ -132,7 +132,9 @@ class QdrantClient:
         Creates a collection with:
         - Dense vectors: Semantic embeddings (e.g., 768 dimensions)
         - Sparse vectors: BM25 keyword embeddings (bm25-rs)
-        - Keyword index on file_type for faceting
+        - Payload indexes: file_type (faceting), source_path + chunk_index
+          (neighbor-context lookups — without them every -C/-B/-A fetch full-scans
+          the collection once per distinct source document)
 
         Args:
             collection_name: Collection name.
@@ -157,8 +159,11 @@ class QdrantClient:
                 },
             )
 
-        # Ensure keyword index on file_type for faceting (idempotent)
-        await self._ensure_file_type_index(collection_name)
+        # Ensure payload indexes exist (idempotent): file_type for faceting,
+        # source_path + chunk_index for neighbor-context lookups.
+        await self._ensure_payload_index(collection_name, 'file_type', PayloadSchemaType.KEYWORD)
+        await self._ensure_payload_index(collection_name, 'source_path', PayloadSchemaType.KEYWORD)
+        await self._ensure_payload_index(collection_name, 'chunk_index', PayloadSchemaType.INTEGER)
 
     async def get_indexing_threshold(self, collection_name: str) -> int:
         """Get current indexing threshold.
@@ -515,25 +520,26 @@ class QdrantClient:
         )
         return {str(hit.value): hit.count for hit in result.hits}
 
-    async def _ensure_file_type_index(self, collection_name: str) -> None:
-        """Create keyword index on file_type for faceting if not exists.
+    async def _ensure_payload_index(
+        self, collection_name: str, field_name: str, field_schema: PayloadSchemaType
+    ) -> None:
+        """Create a payload index on ``field_name`` if it doesn't already exist.
 
-        This is idempotent - checks if index exists before creating.
+        Idempotent - checks the collection's payload schema before creating.
         Index creation happens asynchronously in the background.
         """
         if not await self.collection_exists(collection_name):
             return
 
-        # Check if file_type index already exists in payload schema
         info = await self._client.get_collection(collection_name)
         payload_schema = getattr(info, 'payload_schema', {}) or {}
-        if 'file_type' in payload_schema:
-            logger.debug('file_type index already exists')
+        if field_name in payload_schema:
+            logger.debug('%s index already exists', field_name)
             return
 
         await self._client.create_payload_index(
             collection_name=collection_name,
-            field_name='file_type',
-            field_schema=PayloadSchemaType.KEYWORD,
+            field_name=field_name,
+            field_schema=field_schema,
         )
-        logger.debug('Created file_type keyword index')
+        logger.debug('Created %s index (%s)', field_name, field_schema)
