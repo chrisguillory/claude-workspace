@@ -91,7 +91,8 @@ class ChatDB:
         """Get the active connection, connecting if needed."""
         if self._conn is None:
             self.connect()
-        assert self._conn is not None  # noqa: S101 — post-connect invariant
+        if self._conn is None:
+            raise RuntimeError('connect() returned without establishing a connection')
         return self._conn
 
     # -- Queries: Chats --

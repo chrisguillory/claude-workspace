@@ -1,5 +1,31 @@
 {
   "$defs": {
+    "AgentColorRecord": {
+      "additionalProperties": false,
+      "description": "Palette color assigned to a worker-agent session.\n\nBinary ``JzH(sessionFile,{type:\"agent-color\",agentColor,sessionId})``; written only\nwhen the color is truthy (``\"default\"`` is skipped).",
+      "properties": {
+        "type": {
+          "const": "agent-color",
+          "title": "Type",
+          "type": "string"
+        },
+        "agentColor": {
+          "title": "Agentcolor",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "agentColor",
+        "sessionId"
+      ],
+      "title": "AgentColorRecord",
+      "type": "object"
+    },
     "AgentListingDeltaAttachment": {
       "additionalProperties": false,
       "description": "Agent registry changes \u2014 added/removed agent types for the Agent tool (Claude Code 2.1.90+).",
@@ -173,6 +199,32 @@
         "message"
       ],
       "title": "AgentProgressData",
+      "type": "object"
+    },
+    "AgentSettingRecord": {
+      "additionalProperties": false,
+      "description": "Agent-type setting for a session.\n\nBinary metadata-reemit ``$.push({type:\"agent-setting\",agentSetting,sessionId})``;\n``agentSetting`` is the agentType identifier string (e.g. ``\"custom\"``), not an object.",
+      "properties": {
+        "type": {
+          "const": "agent-setting",
+          "title": "Type",
+          "type": "string"
+        },
+        "agentSetting": {
+          "title": "Agentsetting",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "agentSetting",
+        "sessionId"
+      ],
+      "title": "AgentSettingRecord",
       "type": "object"
     },
     "AgentState": {
@@ -843,6 +895,9 @@
             },
             {
               "$ref": "#/$defs/NetworkDownError"
+            },
+            {
+              "$ref": "#/$defs/RetryableHttpError"
             },
             {
               "$ref": "#/$defs/EmptyError"
@@ -1584,6 +1639,7 @@
               "selected_lines_in_ide": "#/$defs/SelectedLinesInIdeAttachment",
               "skill_listing": "#/$defs/SkillListingAttachment",
               "task_reminder": "#/$defs/TaskReminderAttachment",
+              "task_status": "#/$defs/TaskStatusAttachment",
               "ultrathink_effort": "#/$defs/UltrathinkEffortAttachment",
               "workflow_keyword_request": "#/$defs/WorkflowKeywordRequestAttachment"
             },
@@ -1685,6 +1741,9 @@
             },
             {
               "$ref": "#/$defs/UltrathinkEffortAttachment"
+            },
+            {
+              "$ref": "#/$defs/TaskStatusAttachment"
             }
           ],
           "title": "Attachment"
@@ -3349,6 +3408,97 @@
       "title": "ConnectionError",
       "type": "object"
     },
+    "ContentReplacement": {
+      "additionalProperties": false,
+      "description": "A single tool-result replacement within a ContentReplacementRecord.",
+      "properties": {
+        "kind": {
+          "const": "tool-result",
+          "title": "Kind",
+          "type": "string"
+        },
+        "toolUseId": {
+          "title": "Tooluseid",
+          "type": "string"
+        },
+        "replacement": {
+          "title": "Replacement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "toolUseId",
+        "replacement"
+      ],
+      "title": "ContentReplacement",
+      "type": "object"
+    },
+    "ContentReplacementRecord": {
+      "additionalProperties": false,
+      "description": "Replaces persisted tool-result content (compaction/fork dedup).\n\nBinary has three write sites: bulk ``{type,sessionId,replacements}``; fork/clone adds\n``uuid``+``timestamp``; per-agent (route-by-agent) adds ``agentId``. Each replacement\nswaps a tool_use's stored output for a compacted form.",
+      "properties": {
+        "type": {
+          "const": "content-replacement",
+          "title": "Type",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        },
+        "replacements": {
+          "items": {
+            "$ref": "#/$defs/ContentReplacement"
+          },
+          "title": "Replacements",
+          "type": "array"
+        },
+        "agentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agentid"
+        },
+        "uuid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uuid"
+        },
+        "timestamp": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp"
+        }
+      },
+      "required": [
+        "type",
+        "sessionId",
+        "replacements"
+      ],
+      "title": "ContentReplacementRecord",
+      "type": "object"
+    },
     "ContextManagement": {
       "additionalProperties": false,
       "description": "Context management metadata for message responses (Claude Code 2.0.51+).",
@@ -4424,6 +4574,42 @@
         "totalLines"
       ],
       "title": "FileInfo",
+      "type": "object"
+    },
+    "ForkContextRefRecord": {
+      "additionalProperties": false,
+      "description": "Subagent fork-context pointer linking a forked subagent journal to its parent.\n\nBinary ``appendEntry({type:\"fork-context-ref\",agentId,parentSessionId,parentLastUuid,\ncontextLength})`` (route-by-agent -> ``subagents/agent-*.jsonl``). Minimal pointer:\nno uuid/timestamp/sessionId/cwd envelope -- ``parentSessionId``/``parentLastUuid``\nreference the parent instead.",
+      "properties": {
+        "type": {
+          "const": "fork-context-ref",
+          "title": "Type",
+          "type": "string"
+        },
+        "agentId": {
+          "title": "Agentid",
+          "type": "string"
+        },
+        "parentSessionId": {
+          "title": "Parentsessionid",
+          "type": "string"
+        },
+        "parentLastUuid": {
+          "title": "Parentlastuuid",
+          "type": "string"
+        },
+        "contextLength": {
+          "title": "Contextlength",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "agentId",
+        "parentSessionId",
+        "parentLastUuid",
+        "contextLength"
+      ],
+      "title": "ForkContextRefRecord",
       "type": "object"
     },
     "ForkOrigin": {
@@ -5628,6 +5814,36 @@
         "skills"
       ],
       "title": "InvokedSkillsAttachment",
+      "type": "object"
+    },
+    "IsolationLatchRecord": {
+      "additionalProperties": false,
+      "description": "Coordinator/worker isolation side for a session.\n\nBinary ``Y$4(sessionFile,{type:\"isolation-latch\",side,sessionId})`` where\n``side = isCoordinatorMode() ? \"coordinator\" : \"normal\"`` (same projection as\nSessionModeRecord.mode).",
+      "properties": {
+        "type": {
+          "const": "isolation-latch",
+          "title": "Type",
+          "type": "string"
+        },
+        "side": {
+          "enum": [
+            "coordinator",
+            "normal"
+          ],
+          "title": "Side",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "side",
+        "sessionId"
+      ],
+      "title": "IsolationLatchRecord",
       "type": "object"
     },
     "JsonValue": {},
@@ -6961,7 +7177,7 @@
     },
     "NetworkDownError": {
       "additionalProperties": false,
-      "description": "Network-down api_error variant (Claude Code 2.1.161+).\n\nDistinct from ApiError (status/headers), NetworkError (cause), and EmptyError\n(null-type-only): identified by required formatted + connection + isNetworkDown.",
+      "description": "Request-diagnostic api_error envelope (Claude Code 2.1.161+).\n\nCovers network-down (connection = NetworkDownConnection, isNetworkDown true) and\nrequest-timeout (connection null, isNetworkDown false) -- the binary builds connection\nvia ``VU(H)``, which returns null when there is no socket-level failure. Distinct from\nApiError (status/headers), NetworkError (cause), EmptyError (null-type-only), and\nRetryableHttpError (has status): identified by formatted + isNetworkDown, no status.",
       "properties": {
         "message": {
           "title": "Message",
@@ -6972,7 +7188,14 @@
           "type": "string"
         },
         "connection": {
-          "$ref": "#/$defs/NetworkDownConnection"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkDownConnection"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "isNetworkDown": {
           "title": "Isnetworkdown",
@@ -7930,6 +8153,38 @@
       "title": "QueuedCommandAttachment",
       "type": "object"
     },
+    "RateLimitInfo": {
+      "additionalProperties": false,
+      "description": "Rate-limit fields copied from the server ``anthropic-ratelimit-unified-*`` headers.\n\n``rateLimitType`` is a pass-through ``str``, NOT a Literal: the producer writes the raw\nheader value, so the set is server-defined, not binary-enumerated. The binary only\n*consumes* a known subset (``five_hour``/``seven_day``/``seven_day_opus``/\n``seven_day_sonnet``) -- per the binary-proven gate, consumer checks don't gate, and a\nLiteral would reject server-added types the producer passes through. ``resetsAt`` is a\nunix epoch from the ``-reset`` header.",
+      "properties": {
+        "rateLimitType": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ratelimittype"
+        },
+        "resetsAt": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resetsat"
+        }
+      },
+      "title": "RateLimitInfo",
+      "type": "object"
+    },
     "ReadFileUnchangedFileInfo": {
       "additionalProperties": false,
       "description": "File info for Read tool 'file_unchanged' variant \u2014 file content unchanged since last read.",
@@ -8186,6 +8441,70 @@
         "action"
       ],
       "title": "RemoteTriggerToolInput",
+      "type": "object"
+    },
+    "RetryableHttpError": {
+      "additionalProperties": false,
+      "description": "Retryable HTTP api_error (429 rate_limit / 529 overloaded) with the network-diagnostic envelope.\n\nThe server responded with a retryable status, so this carries HTTP ``status`` +\n``requestId`` alongside the same ``formatted``/``connection``/``isNetworkDown``/\n``rateLimits`` envelope as NetworkDownError. Distinct from ApiError (``headers`` +\ncapital-D ``requestID``) and NetworkDownError (no ``status``; ``connection`` is an\nobject): identified by required ``status`` + the envelope. ``connection``/``rateLimits``\nare null on a server-side HTTP error (the socket reached the server). Same binary error\nreducer as NetworkDownError. Spans Claude Code 2.1.161+.",
+      "properties": {
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "integer"
+        },
+        "requestId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requestid"
+        },
+        "formatted": {
+          "title": "Formatted",
+          "type": "string"
+        },
+        "connection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkDownConnection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "isNetworkDown": {
+          "title": "Isnetworkdown",
+          "type": "boolean"
+        },
+        "rateLimits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RateLimitInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "message",
+        "status",
+        "formatted",
+        "connection",
+        "isNetworkDown",
+        "rateLimits"
+      ],
+      "title": "RetryableHttpError",
       "type": "object"
     },
     "SavedHookContextRecord": {
@@ -8919,7 +9238,7 @@
     },
     "SessionModeRecord": {
       "additionalProperties": false,
-      "description": "Records the active session mode for a session.\n\nResumption-state sidecar written alongside PermissionModeRecord; does NOT\ninherit from BaseRecord -- minimal schema with no uuid/timestamp. Binary\ndomain is {'normal', 'coordinator'} (a boolean projection of\n``isCoordinatorMode()``); modeled Literal['normal'] per empirical-only\nmodeling, with 'coordinator' deferred until observed in JSONL.",
+      "description": "Records the active session mode for a session.\n\nResumption-state sidecar written alongside PermissionModeRecord; does NOT\ninherit from BaseRecord -- minimal schema with no uuid/timestamp. Binary\n``$.push({type:\"mode\",mode:this.currentSessionMode,sessionId:q})`` where mode is\n``isCoordinatorMode() ? \"coordinator\" : \"normal\"`` (same projection as\nIsolationLatchRecord.side).",
       "properties": {
         "type": {
           "const": "mode",
@@ -8927,7 +9246,10 @@
           "type": "string"
         },
         "mode": {
-          "const": "normal",
+          "enum": [
+            "coordinator",
+            "normal"
+          ],
           "title": "Mode",
           "type": "string"
         },
@@ -9067,6 +9389,32 @@
       "title": "SkillToolResult",
       "type": "object"
     },
+    "SpeculationAcceptRecord": {
+      "additionalProperties": false,
+      "description": "Records a speculative-decoding acceptance and the wall-time it saved.\n\nBinary ``appendFile(sessionFile,{type:\"speculation-accept\",timestamp,timeSavedMs})``,\nwritten only when ``timeSavedMs > 0``. No sessionId/uuid envelope.",
+      "properties": {
+        "type": {
+          "const": "speculation-accept",
+          "title": "Type",
+          "type": "string"
+        },
+        "timestamp": {
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "timeSavedMs": {
+          "title": "Timesavedms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "timestamp",
+        "timeSavedMs"
+      ],
+      "title": "SpeculationAcceptRecord",
+      "type": "object"
+    },
     "StatusChange": {
       "additionalProperties": false,
       "description": "Status transition details.",
@@ -9168,6 +9516,21 @@
           },
           "title": "Hookerrors",
           "type": "array"
+        },
+        "hookAdditionalContext": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hookadditionalcontext"
         },
         "preventedContinuation": {
           "title": "Preventedcontinuation",
@@ -9437,6 +9800,56 @@
         "message"
       ],
       "title": "SystemRecord",
+      "type": "object"
+    },
+    "TagRecord": {
+      "additionalProperties": false,
+      "description": "User-assigned session tag.\n\nBinary rich path ``append([{type:\"tag\",tag,sessionId,uuid,timestamp}])`` (set-tag\nhandler); the metadata-reemit path ``$.push({type:\"tag\",tag,sessionId})`` omits\nuuid/timestamp. ``tag`` is ``\"\"`` when cleared. Distinct from the slash-command\nparser's ``{type:\"tag\",path,push,...}``, which is not a record.",
+      "properties": {
+        "type": {
+          "const": "tag",
+          "title": "Type",
+          "type": "string"
+        },
+        "tag": {
+          "title": "Tag",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        },
+        "uuid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uuid"
+        },
+        "timestamp": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp"
+        }
+      },
+      "required": [
+        "type",
+        "tag",
+        "sessionId"
+      ],
+      "title": "TagRecord",
       "type": "object"
     },
     "TaskCreateToolInput": {
@@ -9843,6 +10256,70 @@
         "task"
       ],
       "title": "TaskSingleToolResult",
+      "type": "object"
+    },
+    "TaskStatusAttachment": {
+      "additionalProperties": false,
+      "description": "Background-execution status delta (the ``claude agents`` / Agent-tool runtime).\n\nA \"task\" here is a background job (``taskType`` local_agent | local_bash; for an agent\n``taskId`` IS the agentId) -- the runtime sense, NOT the TaskCreate/TaskUpdate TODO\ntracker (tell them apart by status: TODO is pending/in_progress/completed; runtime is\nqueued/running/completed/failed/killed). Binary ``{type:\"task_status\",taskId,taskType,\nstatus,description,deltaSummary,outputFilePath}``; ``deltaSummary`` is the running\nprogress summary else the error (nullable). ``status`` is binary-enumerated (literal\nwrite sites), unlike server pass-throughs like RateLimitInfo.rateLimitType.",
+      "properties": {
+        "type": {
+          "const": "task_status",
+          "title": "Type",
+          "type": "string"
+        },
+        "taskId": {
+          "title": "Taskid",
+          "type": "string"
+        },
+        "taskType": {
+          "enum": [
+            "local_agent",
+            "local_bash"
+          ],
+          "title": "Tasktype",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "failed",
+            "killed",
+            "queued",
+            "running"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "deltaSummary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Deltasummary"
+        },
+        "outputFilePath": {
+          "title": "Outputfilepath",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "taskId",
+        "taskType",
+        "status",
+        "description",
+        "deltaSummary",
+        "outputFilePath"
+      ],
+      "title": "TaskStatusAttachment",
       "type": "object"
     },
     "TaskStopToolResult": {
@@ -12603,6 +13080,27 @@
       "$ref": "#/$defs/BridgeSessionRecord"
     },
     {
+      "$ref": "#/$defs/TagRecord"
+    },
+    {
+      "$ref": "#/$defs/AgentColorRecord"
+    },
+    {
+      "$ref": "#/$defs/AgentSettingRecord"
+    },
+    {
+      "$ref": "#/$defs/IsolationLatchRecord"
+    },
+    {
+      "$ref": "#/$defs/SpeculationAcceptRecord"
+    },
+    {
+      "$ref": "#/$defs/ContentReplacementRecord"
+    },
+    {
+      "$ref": "#/$defs/ForkContextRefRecord"
+    },
+    {
       "$ref": "#/$defs/AttachmentRecord"
     },
     {
@@ -12613,9 +13111,9 @@
   "$id": "https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json",
   "title": "Claude Code Session Record",
   "description": "Complete schema for Claude Code session JSONL records",
-  "x-schema-version": "0.2.41",
+  "x-schema-version": "0.2.43",
   "x-claude-code-compatibility": {
     "min": "2.0.35",
-    "max": "2.1.162"
+    "max": "2.1.163"
   }
 }
