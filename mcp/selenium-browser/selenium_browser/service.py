@@ -563,15 +563,13 @@ class BrowserService:
 
         Args:
             filename: Output filename (e.g., "checkout-page.png")
-            mode: 'viewport' (visible area only), 'full_page' (entire scrollable page, triggering
-                lazy cross-origin content like GitHub Mermaid/math), or 'full_page_fast' (full page
-                without the lazy-content warm-up — faster, but below-the-fold lazy content may be blank).
+            mode: 'viewport' (visible area only), or one of two full-page modes that scroll and stitch
+                viewport tiles to capture the whole scrollable page: 'full_page' warms up lazy
+                cross-origin content (GitHub Mermaid/math) first, 'full_page_fast' skips that warm-up
+                (faster, but below-the-fold lazy content may be blank).
 
         Returns:
             Absolute path to saved screenshot (use Read tool to view)
-
-        Note: The full_page modes scroll-and-stitch viewport tiles — the only way to capture lazy
-              cross-origin iframes (e.g. GitHub Mermaid).
         """
         driver = await self.get_browser()
         screenshot_path = self.state.screenshot_dir / sanitize_filename(filename, 'screenshot')
