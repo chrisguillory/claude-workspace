@@ -10,6 +10,7 @@ from mcp.types import ToolAnnotations
 from ..models import (
     DownloadResourceResult,
     JavaScriptResult,
+    ScreenshotMode,
     WindowSize,
 )
 from ..service import BrowserService
@@ -156,7 +157,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         return await service.execute_javascript(code=code, timeout_ms=timeout_ms)
 
     @mcp.tool(annotations=ToolAnnotations(title='Take Screenshot', readOnlyHint=True))
-    async def screenshot(filename: str, full_page: bool = False, trigger_lazy: bool = True) -> str:
+    async def screenshot(filename: str, mode: ScreenshotMode = 'viewport') -> str:
         """Capture visual screenshot for verification and debugging.
 
         Use cases:
@@ -167,15 +168,14 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
 
         Args:
             filename: Output filename (e.g., "checkout-page.png")
-            full_page: True for entire scrollable page, False for viewport only
-            trigger_lazy: For full_page, scroll the page first so lazy / IntersectionObserver
-                content (Mermaid/math diagrams, lazy images) renders before capture. Default True.
+            mode: 'viewport' (visible area only), 'full_page' (entire scrollable page, triggering
+                lazy cross-origin content like GitHub Mermaid/math), or 'full_page_fast' (full page
+                without the lazy-content warm-up — faster, but below-the-fold lazy content may be blank).
 
         Returns:
             Absolute path to saved screenshot (use Read tool to view)
 
-        Note: Requires vision processing. full_page=True scroll-and-stitches viewport tiles —
-              the only way to capture lazy cross-origin iframes (e.g. GitHub Mermaid); trigger_lazy
-              adds a dwell so lazy content renders before each tile is captured.
+        Note: The full_page modes scroll-and-stitch viewport tiles — the only way to capture lazy
+              cross-origin iframes (e.g. GitHub Mermaid).
         """
-        return await service.screenshot(filename=filename, full_page=full_page, trigger_lazy=trigger_lazy)
+        return await service.screenshot(filename=filename, mode=mode)
