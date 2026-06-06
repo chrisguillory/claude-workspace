@@ -1069,11 +1069,9 @@ def cmd_save_setup_token(token: str, login_id: str) -> None:
         print('ERROR: Setup tokens are only for subscription accounts (Pro/Max/Team).', file=sys.stderr)
         sys.exit(1)
 
-    updated = login.model_copy(
-        update={
-            'setup_token': token,
-            'setup_token_created_at': datetime.now(UTC),
-        },
+    updated = login.__replace__(
+        setup_token=token,
+        setup_token_created_at=datetime.now(UTC),
     )
     save_login(updated)
 
@@ -1089,7 +1087,7 @@ def cmd_clear_setup_token(login_id: str) -> None:
         print(f'ERROR: No setup token on this login: {login_id}', file=sys.stderr)
         sys.exit(1)
 
-    updated = login.model_copy(update={'setup_token': None, 'setup_token_created_at': None})
+    updated = login.__replace__(setup_token=None, setup_token_created_at=None)
     save_login(updated)
 
     print(f'Removed setup-token from: {login_id}')
