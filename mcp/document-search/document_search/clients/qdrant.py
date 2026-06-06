@@ -30,12 +30,23 @@ from qdrant_client.http.models import (
     MatchValue,
     Modifier,
     OptimizersConfigDiff,
-    PayloadSchemaType,
     PointStruct,
     Prefetch,
     SparseVector,
     SparseVectorParams,
     VectorParams,
+)
+
+# Index-params types live in the .models submodule and aren't re-exported through the
+# package's `from .models import *` (no __all__), so the package path isn't mypy-visible
+# for them. Import the index-schema set from the submodule together so PayloadSchemaType
+# is the same type identity the PayloadFieldSchema union references (the package alias is
+# a distinct symbol to mypy).
+from qdrant_client.http.models.models import (
+    IntegerIndexParams,
+    IntegerIndexType,
+    PayloadFieldSchema,
+    PayloadSchemaType,
 )
 
 from document_search.clients import _retry
@@ -132,9 +143,9 @@ class QdrantClient:
         Creates a collection with:
         - Dense vectors: Semantic embeddings (e.g., 768 dimensions)
         - Sparse vectors: BM25 keyword embeddings (bm25-rs)
-        - Payload indexes: file_type (faceting), source_path + chunk_index
-          (neighbor-context lookups — without them every -C/-B/-A fetch full-scans
-          the collection once per distinct source document)
+        - Payload indexes: file_type (faceting) and chunk_index (neighbor-context
+          lookups — turns the per-document -C/-B/-A scroll from a full scan into a
+          point lookup; on_disk to keep it out of RAM)
 
         Args:
             collection_name: Collection name.
@@ -160,10 +171,15 @@ class QdrantClient:
             )
 
         # Ensure payload indexes exist (idempotent): file_type for faceting,
-        # source_path + chunk_index for neighbor-context lookups.
+        # chunk_index (on_disk) for neighbor-context lookups. on_disk's RAM saving is
+        # eventually consistent — it materializes once the optimizer migrates points
+        # into immutable mmap segments (which the indexing pipeline triggers by
+        # restoring the threshold post-reindex); the active mutable segment stays in
+        # RAM briefly.
         await self._ensure_payload_index(collection_name, 'file_type', PayloadSchemaType.KEYWORD)
-        await self._ensure_payload_index(collection_name, 'source_path', PayloadSchemaType.KEYWORD)
-        await self._ensure_payload_index(collection_name, 'chunk_index', PayloadSchemaType.INTEGER)
+        await self._ensure_payload_index(
+            collection_name, 'chunk_index', IntegerIndexParams(type=IntegerIndexType.INTEGER, on_disk=True)
+        )
 
     async def get_indexing_threshold(self, collection_name: str) -> int:
         """Get current indexing threshold.
@@ -521,7 +537,7 @@ class QdrantClient:
         return {str(hit.value): hit.count for hit in result.hits}
 
     async def _ensure_payload_index(
-        self, collection_name: str, field_name: str, field_schema: PayloadSchemaType
+        self, collection_name: str, field_name: str, field_schema: PayloadFieldSchema
     ) -> None:
         """Create a payload index on ``field_name`` if it doesn't already exist.
 
