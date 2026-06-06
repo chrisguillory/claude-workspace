@@ -105,7 +105,7 @@ Use REST — `gh pr edit --body` hits the deprecated Projects Classic API.
 
 ### Phase 6: Post-creation
 
-Report the PR URL. Merges here gate on the `merge-gatekeeper` umbrella check (ruleset-protected, linear history) — offer `gh pr merge --squash --auto` if the user wants it to land on green.
+Report the PR URL. Merges here gate on CI (ruleset-protected, linear history) — offer `gh pr merge --squash --auto` if the user wants it to land on green.
 
 **After the PR is open, never amend or force-push.** Land follow-ons — review responses,
 fixes, adjustments — as **new dedicated commits** (`fix: …`, "address review", "add test")
