@@ -56,7 +56,12 @@ from document_search.schemas.vectors import (
     SearchResult,
     SearchType,
 )
-from document_search.search_config import clamp_search_limit, format_snippet, rerank_candidate_count
+from document_search.search_config import (
+    clamp_search_limit,
+    rerank_candidate_count,
+    resolve_context_window,
+    snippet_hit,
+)
 from document_search.search_path import resolve_filter_paths, resolve_index_paths, resolve_search_paths, to_repo_filter
 from document_search.services.chunking import ChunkingService
 from document_search.services.embedding import EmbeddingService
@@ -335,13 +340,21 @@ Args:
     min_score: Minimum cross-encoder relevance score. The reranker produces
         raw logits where negative = irrelevant, positive = relevant.
         Use 0.0 for "only relevant results", higher for stricter filtering.
+    context: Return this many chunks on each side of every hit, from the same
+        document (grep -C). before/after override per direction. Default 0 (no context).
+    before: Chunks before each hit (grep -B). Overrides context for the before side.
+    after: Chunks after each hit (grep -A). Overrides context for the after side.
     snippet_chars: Truncate each hit's text to N characters (>= 1), appending an
-        ellipsis when truncated. Default returns the full chunk text.
+        ellipsis when truncated. Applies to context chunks too. Default returns the
+        full chunk text.
     search_timeout: Qdrant search timeout in seconds (>= 1). Increase for large
         unfiltered collections (path="**"). Default uses client setting (30s).
 
 Returns:
-    SearchResult with ranked hits including text snippets and metadata."""
+    SearchResult with ranked hits including text snippets and metadata. Each hit's
+    `before`/`after` hold its neighboring-chunk context (score 0.0, ordered by
+    chunk_index, deduped, not counted against `limit`); empty unless context is
+    requested."""
 
     @server.tool(
         description=_inject_collections(SEARCH_DOCS_BASE, collections_summary),
@@ -362,6 +375,9 @@ Returns:
         file_types: Sequence[FileType] | None = None,
         exclude_paths: Sequence[str] = (),
         min_score: float | None = None,
+        context: typing.Annotated[int, pydantic.Field(ge=0)] = 0,
+        before: typing.Annotated[int, pydantic.Field(ge=0)] | None = None,
+        after: typing.Annotated[int, pydantic.Field(ge=0)] | None = None,
         snippet_chars: typing.Annotated[int, pydantic.Field(ge=1)] | None = None,
         search_timeout: typing.Annotated[int, pydantic.Field(ge=1)] | None = None,
     ) -> SearchResult:
@@ -451,11 +467,17 @@ Returns:
             filtered_hits = [h for h in result.hits if h.score >= min_score]
             result = SearchResult(hits=filtered_hits, total=len(filtered_hits))
 
+        # Attach neighboring-chunk context on the final hit set (after rerank + min_score),
+        # so context is fetched only for the hits actually returned and deduped against them.
+        before_count, after_count = resolve_context_window(context=context, before=before, after=after)
+        hits_with_context = await repository.fetch_neighbors(
+            result.hits, before=before_count, after=after_count, search_timeout=search_timeout
+        )
+        result = SearchResult(hits=hits_with_context, total=result.total)
+
         if snippet_chars is not None:
             result = SearchResult(
-                hits=[
-                    h.model_copy(update={'text': format_snippet(h.text, max_chars=snippet_chars)}) for h in result.hits
-                ],
+                hits=[snippet_hit(h, snippet_chars) for h in result.hits],
                 total=result.total,
             )
 

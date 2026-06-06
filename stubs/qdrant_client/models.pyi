@@ -34,6 +34,12 @@ from qdrant_client.http.models import (
     HasVectorCondition as HasVectorCondition,
 )
 from qdrant_client.http.models import (
+    IntegerIndexParams as IntegerIndexParams,
+)
+from qdrant_client.http.models import (
+    IntegerIndexType as IntegerIndexType,
+)
+from qdrant_client.http.models import (
     IsEmptyCondition as IsEmptyCondition,
 )
 from qdrant_client.http.models import (
@@ -56,6 +62,12 @@ from qdrant_client.http.models import (
 )
 from qdrant_client.http.models import (
     OptimizersConfigDiff as OptimizersConfigDiff,
+)
+from qdrant_client.http.models import (
+    PayloadFieldSchema as PayloadFieldSchema,
+)
+from qdrant_client.http.models import (
+    PayloadSchemaType as PayloadSchemaType,
 )
 from qdrant_client.http.models import (
     PointStruct as PointStruct,
