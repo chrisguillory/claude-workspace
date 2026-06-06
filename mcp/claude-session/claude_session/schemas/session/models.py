@@ -294,6 +294,24 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   producer set, not only JSONL-observed values — strict validation trips on genuine
                   post-binary drift, not on values the installed binary already emits. Extended
                   CLAUDE_CODE_MAX_VERSION to 2.1.162.
+- Schema v0.2.42: Claude Code 2.1.163. Modeled the binary appendEntry record-type family the
+                  empirical-only policy had skipped, all binary-proven with dispatch branches:
+                  ForkContextRefRecord (subagent fork-context pointer; the stuck-session-delete
+                  blocker), TagRecord, AgentColorRecord, AgentSettingRecord, IsolationLatchRecord,
+                  SpeculationAcceptRecord, ContentReplacementRecord. Five sibling rT4 routing types
+                  (frame-link, marble-origami-{commit,snapshot,reset}, attribution-snapshot) left
+                  unmodeled — registered-but-unwired or dead code, no enumerable producer. Added
+                  RetryableHttpError + RateLimitInfo: the retryable-HTTP api_error variant (429
+                  rate_limit / 529 overloaded — status + requestId + the network-down envelope), a
+                  fifth error-union member. StopHookSummarySystemRecord.hookAdditionalContext
+                  (2.1.163). TaskStatusAttachment (background-execution status, distinct from the
+                  TaskCreate TODO system). SessionModeRecord.mode + IsolationLatchRecord.side gained
+                  'coordinator' (binary isCoordinatorMode projection; previously empirical-only-
+                  deferred). Extended CLAUDE_CODE_MAX_VERSION to 2.1.163.
+- Schema v0.2.43: NetworkDownError.connection -> nullable. The request-diagnostic api_error
+                  envelope (formatted + isNetworkDown, no status) also carries request-timeouts
+                  ({connection: null, isNetworkDown: false}); the binary's VU(H) connection builder
+                  returns null when there is no socket-level failure. MAX unchanged (2.1.163).
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -364,10 +382,12 @@ __all__ = [
     'CLAUDE_CODE_MAX_VERSION',
     'CLAUDE_CODE_MIN_VERSION',
     'SCHEMA_VERSION',
+    'AgentColorRecord',
     'AgentListingDeltaAttachment',
     'AgentNameRecord',
     'AgentOutputToolInput',
     'AgentProgressData',
+    'AgentSettingRecord',
     'AgentState',
     'AgentTeammateSpawnedResult',
     'AgentsKilledSystemRecord',
@@ -413,6 +433,8 @@ __all__ = [
     'CompactMetadata',
     'CompanionIntroAttachment',
     'ConnectionError',
+    'ContentReplacement',
+    'ContentReplacementRecord',
     'ContextManagement',
     'CronCreateToolInput',
     'CronCreateToolResult',
@@ -449,6 +471,7 @@ __all__ = [
     'FileHistorySnapshot',
     'FileHistorySnapshotRecord',
     'FileInfo',
+    'ForkContextRefRecord',
     'ForkOrigin',
     'GlobToolInput',
     'GlobToolResult',
@@ -470,6 +493,7 @@ __all__ = [
     'InformationalSystemRecord',
     'InvokedSkill',
     'InvokedSkillsAttachment',
+    'IsolationLatchRecord',
     'KillShellMessageResult',
     'KillShellToolInput',
     'KillShellToolResult',
@@ -524,6 +548,7 @@ __all__ = [
     'QuestionOption',
     'QueueOperationRecord',
     'QueuedCommandAttachment',
+    'RateLimitInfo',
     'ReadFileUnchangedFileInfo',
     'ReadFileUnchangedToolResult',
     'ReadImageToolResult',
@@ -535,6 +560,7 @@ __all__ = [
     'ReadTextToolResult',
     'ReadToolInput',
     'RemoteTriggerToolInput',
+    'RetryableHttpError',
     'SavedHookContextRecord',
     'ScheduleWakeupToolInput',
     'ScheduledTaskFireSystemRecord',
@@ -559,6 +585,7 @@ __all__ = [
     'SkillListingAttachment',
     'SkillToolInput',
     'SkillToolResult',
+    'SpeculationAcceptRecord',
     'StatusChange',
     'StopHookSummarySystemRecord',
     'StrictModel',
@@ -566,6 +593,7 @@ __all__ = [
     'SummaryRecord',
     'SystemRecord',
     'SystemSubtypeRecord',
+    'TagRecord',
     'Task',
     'TaskCreateToolInput',
     'TaskGetItem',
@@ -579,6 +607,7 @@ __all__ = [
     'TaskReminderItem',
     'TaskSingleItem',
     'TaskSingleToolResult',
+    'TaskStatusAttachment',
     'TaskStopToolResult',
     'TaskToolInput',
     'TaskToolResult',
@@ -633,9 +662,9 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.41'
+SCHEMA_VERSION = '0.2.43'
 CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
-CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.162')
+CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.163')
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -1879,17 +1908,56 @@ class NetworkDownConnection(StrictModel):
 
 
 class NetworkDownError(StrictModel):
-    """Network-down api_error variant (Claude Code 2.1.161+).
+    """Request-diagnostic api_error envelope (Claude Code 2.1.161+).
 
-    Distinct from ApiError (status/headers), NetworkError (cause), and EmptyError
-    (null-type-only): identified by required formatted + connection + isNetworkDown.
+    Covers network-down (connection = NetworkDownConnection, isNetworkDown true) and
+    request-timeout (connection null, isNetworkDown false) -- the binary builds connection
+    via ``VU(H)``, which returns null when there is no socket-level failure. Distinct from
+    ApiError (status/headers), NetworkError (cause), EmptyError (null-type-only), and
+    RetryableHttpError (has status): identified by formatted + isNetworkDown, no status.
     """
 
     message: str
     formatted: str
-    connection: NetworkDownConnection
+    connection: NetworkDownConnection | None  # null on timeouts (no socket-level failure)
     isNetworkDown: bool
     rateLimits: None = None  # null in this variant
+
+
+class RateLimitInfo(StrictModel):
+    """Rate-limit fields copied from the server ``anthropic-ratelimit-unified-*`` headers.
+
+    ``rateLimitType`` is a pass-through ``str``, NOT a Literal: the producer writes the raw
+    header value, so the set is server-defined, not binary-enumerated. The binary only
+    *consumes* a known subset (``five_hour``/``seven_day``/``seven_day_opus``/
+    ``seven_day_sonnet``) -- per the binary-proven gate, consumer checks don't gate, and a
+    Literal would reject server-added types the producer passes through. ``resetsAt`` is a
+    unix epoch from the ``-reset`` header.
+    """
+
+    rateLimitType: str | None = None
+    resetsAt: int | None = None
+
+
+class RetryableHttpError(StrictModel):
+    """Retryable HTTP api_error (429 rate_limit / 529 overloaded) with the network-diagnostic envelope.
+
+    The server responded with a retryable status, so this carries HTTP ``status`` +
+    ``requestId`` alongside the same ``formatted``/``connection``/``isNetworkDown``/
+    ``rateLimits`` envelope as NetworkDownError. Distinct from ApiError (``headers`` +
+    capital-D ``requestID``) and NetworkDownError (no ``status``; ``connection`` is an
+    object): identified by required ``status`` + the envelope. ``connection``/``rateLimits``
+    are null on a server-side HTTP error (the socket reached the server). Same binary error
+    reducer as NetworkDownError. Spans Claude Code 2.1.161+.
+    """
+
+    message: str
+    status: int
+    requestId: str | None = None  # H.requestID ?? undefined -- absent on some records
+    formatted: str
+    connection: NetworkDownConnection | None  # object on socket failures, null on HTTP errors
+    isNetworkDown: bool
+    rateLimits: RateLimitInfo | None  # parsed ratelimit headers, else null
 
 
 # -- MCP Metadata (Claude Code 2.1.19+) ----------------------------------------
@@ -3024,8 +3092,8 @@ class ApiErrorSystemRecord(BaseRecord):
     agentName: str | None = None
     cause: ConnectionError | None = None  # Connection error details (for network failures)
     error: (
-        ApiError | NetworkError | NetworkDownError | EmptyError
-    )  # api/network/network-down/empty (EmptyError last — no required fields)
+        ApiError | NetworkError | NetworkDownError | RetryableHttpError | EmptyError
+    )  # api/network/network-down/retryable-http/empty (EmptyError last — no required fields)
     retryInMs: float
     retryAttempt: int
     maxRetries: int
@@ -3094,6 +3162,7 @@ class StopHookSummarySystemRecord(BaseRecord):
     hookCount: int
     hookInfos: Sequence[HookInfo]
     hookErrors: Sequence[str]  # Empty sequence observed so far
+    hookAdditionalContext: Sequence[str] | None = None  # Stop/SubagentStop additionalContext (2.1.163+)
     preventedContinuation: bool
     stopReason: str  # Can be empty string
     hasOutput: bool
@@ -3525,13 +3594,13 @@ class SessionModeRecord(StrictModel):
 
     Resumption-state sidecar written alongside PermissionModeRecord; does NOT
     inherit from BaseRecord -- minimal schema with no uuid/timestamp. Binary
-    domain is {'normal', 'coordinator'} (a boolean projection of
-    ``isCoordinatorMode()``); modeled Literal['normal'] per empirical-only
-    modeling, with 'coordinator' deferred until observed in JSONL.
+    ``$.push({type:"mode",mode:this.currentSessionMode,sessionId:q})`` where mode is
+    ``isCoordinatorMode() ? "coordinator" : "normal"`` (same projection as
+    IsolationLatchRecord.side).
     """
 
     type: Literal['mode']
-    mode: Literal['normal']
+    mode: Literal['coordinator', 'normal']  # last updated ≤2.1.156
     sessionId: str
 
 
@@ -3551,6 +3620,130 @@ class BridgeSessionRecord(StrictModel):
     sessionId: str
     bridgeSessionId: str
     lastSequenceNum: int
+
+
+# -- Agent/session-state records (binary-proven; producers present since ≤2.1.156) -----
+#
+# Minimal records the binary writes via appendEntry/appendFile and re-emits on session-
+# file rotation (reAppendSessionMetadata). Each docstring cites its binary write site;
+# none carry the uuid/timestamp/cwd envelope unless noted. Five sibling rT4 routing types
+# are intentionally NOT modeled -- see the deferred-types note after this section.
+
+
+class TagRecord(StrictModel):
+    """User-assigned session tag.
+
+    Binary rich path ``append([{type:"tag",tag,sessionId,uuid,timestamp}])`` (set-tag
+    handler); the metadata-reemit path ``$.push({type:"tag",tag,sessionId})`` omits
+    uuid/timestamp. ``tag`` is ``""`` when cleared. Distinct from the slash-command
+    parser's ``{type:"tag",path,push,...}``, which is not a record.
+    """
+
+    type: Literal['tag']
+    tag: str
+    sessionId: str
+    uuid: str | None = None  # Rich set-tag write path only
+    timestamp: str | None = None  # Rich set-tag write path only
+
+
+class AgentColorRecord(StrictModel):
+    """Palette color assigned to a worker-agent session.
+
+    Binary ``JzH(sessionFile,{type:"agent-color",agentColor,sessionId})``; written only
+    when the color is truthy (``"default"`` is skipped).
+    """
+
+    type: Literal['agent-color']
+    agentColor: str
+    sessionId: str
+
+
+class AgentSettingRecord(StrictModel):
+    """Agent-type setting for a session.
+
+    Binary metadata-reemit ``$.push({type:"agent-setting",agentSetting,sessionId})``;
+    ``agentSetting`` is the agentType identifier string (e.g. ``"custom"``), not an object.
+    """
+
+    type: Literal['agent-setting']
+    agentSetting: str
+    sessionId: str
+
+
+class IsolationLatchRecord(StrictModel):
+    """Coordinator/worker isolation side for a session.
+
+    Binary ``Y$4(sessionFile,{type:"isolation-latch",side,sessionId})`` where
+    ``side = isCoordinatorMode() ? "coordinator" : "normal"`` (same projection as
+    SessionModeRecord.mode).
+    """
+
+    type: Literal['isolation-latch']
+    side: Literal['coordinator', 'normal']  # last updated ≤2.1.156
+    sessionId: str
+
+
+class SpeculationAcceptRecord(StrictModel):
+    """Records a speculative-decoding acceptance and the wall-time it saved.
+
+    Binary ``appendFile(sessionFile,{type:"speculation-accept",timestamp,timeSavedMs})``,
+    written only when ``timeSavedMs > 0``. No sessionId/uuid envelope.
+    """
+
+    type: Literal['speculation-accept']
+    timestamp: str
+    timeSavedMs: int
+
+
+class ContentReplacement(StrictModel):
+    """A single tool-result replacement within a ContentReplacementRecord."""
+
+    kind: Literal['tool-result']
+    toolUseId: str
+    replacement: str
+
+
+class ContentReplacementRecord(StrictModel):
+    """Replaces persisted tool-result content (compaction/fork dedup).
+
+    Binary has three write sites: bulk ``{type,sessionId,replacements}``; fork/clone adds
+    ``uuid``+``timestamp``; per-agent (route-by-agent) adds ``agentId``. Each replacement
+    swaps a tool_use's stored output for a compacted form.
+    """
+
+    type: Literal['content-replacement']
+    sessionId: str
+    replacements: Sequence[ContentReplacement]
+    agentId: str | None = None  # Per-agent (route-by-agent) write path only
+    uuid: str | None = None  # Fork/clone write path only
+    timestamp: str | None = None  # Fork/clone write path only
+
+
+class ForkContextRefRecord(StrictModel):
+    """Subagent fork-context pointer linking a forked subagent journal to its parent.
+
+    Binary ``appendEntry({type:"fork-context-ref",agentId,parentSessionId,parentLastUuid,
+    contextLength})`` (route-by-agent -> ``subagents/agent-*.jsonl``). Minimal pointer:
+    no uuid/timestamp/sessionId/cwd envelope -- ``parentSessionId``/``parentLastUuid``
+    reference the parent instead.
+    """
+
+    type: Literal['fork-context-ref']
+    agentId: str
+    parentSessionId: str
+    parentLastUuid: str
+    contextLength: int  # Parent-message COUNT forked into the subagent (binary g.length), not a token count
+
+
+# Deferred rT4 routing types (registered but not modeled -- binary-proven gate unmet):
+#   frame-link            -- routing entry only; no producer/construction site exists.
+#   marble-origami-{commit,snapshot,reset} -- dead code (producers present, zero callers
+#                            in 2.1.162/2.1.163; "context-collapse" feature unshipped);
+#                            spread payload unenumerable.
+#   attribution-snapshot  -- genuine writer, but payload is built behind the module export
+#                            boundary (only {type, messageId} provable).
+# Model each when its feature ships and a real record appears in JSONL (strict validation
+# surfaces it via SessionRecordError).
 
 
 # -- Attachment Record (Claude Code 2.1.90+) -----------------------------------
@@ -3963,6 +4156,27 @@ class UltrathinkEffortAttachment(StrictModel):
     type: Literal['ultrathink_effort']
 
 
+class TaskStatusAttachment(StrictModel):
+    """Background-execution status delta (the ``claude agents`` / Agent-tool runtime).
+
+    A "task" here is a background job (``taskType`` local_agent | local_bash; for an agent
+    ``taskId`` IS the agentId) -- the runtime sense, NOT the TaskCreate/TaskUpdate TODO
+    tracker (tell them apart by status: TODO is pending/in_progress/completed; runtime is
+    queued/running/completed/failed/killed). Binary ``{type:"task_status",taskId,taskType,
+    status,description,deltaSummary,outputFilePath}``; ``deltaSummary`` is the running
+    progress summary else the error (nullable). ``status`` is binary-enumerated (literal
+    write sites), unlike server pass-throughs like RateLimitInfo.rateLimitType.
+    """
+
+    type: Literal['task_status']
+    taskId: str
+    taskType: Literal['local_agent', 'local_bash']
+    status: Literal['completed', 'failed', 'killed', 'queued', 'running']
+    description: str
+    deltaSummary: str | None  # progress summary while running, else error; nullable
+    outputFilePath: str
+
+
 AttachmentData = Annotated[
     CompanionIntroAttachment
     | McpInstructionsDeltaAttachment
@@ -3995,7 +4209,8 @@ AttachmentData = Annotated[
     | AutoModeAttachment
     | AutoModeExitAttachment
     | WorkflowKeywordRequestAttachment
-    | UltrathinkEffortAttachment,
+    | UltrathinkEffortAttachment
+    | TaskStatusAttachment,
     pydantic.Field(discriminator='type'),
 ]
 
@@ -4056,6 +4271,13 @@ SessionRecord = Annotated[
     | PermissionModeRecord
     | SessionModeRecord
     | BridgeSessionRecord
+    | TagRecord
+    | AgentColorRecord
+    | AgentSettingRecord
+    | IsolationLatchRecord
+    | SpeculationAcceptRecord
+    | ContentReplacementRecord
+    | ForkContextRefRecord
     | AttachmentRecord
     | BaseRecord,  # Fallback for unknown system subtypes
     pydantic.Field(union_mode='left_to_right'),
@@ -4186,6 +4408,13 @@ _worktree_state_adapter = pydantic.TypeAdapter(WorktreeStateRecord)
 _permission_mode_adapter = pydantic.TypeAdapter(PermissionModeRecord)
 _session_mode_adapter = pydantic.TypeAdapter(SessionModeRecord)
 _bridge_session_adapter = pydantic.TypeAdapter(BridgeSessionRecord)
+_tag_adapter = pydantic.TypeAdapter(TagRecord)
+_agent_color_adapter = pydantic.TypeAdapter(AgentColorRecord)
+_agent_setting_adapter = pydantic.TypeAdapter(AgentSettingRecord)
+_isolation_latch_adapter = pydantic.TypeAdapter(IsolationLatchRecord)
+_speculation_accept_adapter = pydantic.TypeAdapter(SpeculationAcceptRecord)
+_content_replacement_adapter = pydantic.TypeAdapter(ContentReplacementRecord)
+_fork_context_ref_adapter = pydantic.TypeAdapter(ForkContextRefRecord)
 _attachment_adapter = pydantic.TypeAdapter(AttachmentRecord)
 
 
@@ -4252,6 +4481,20 @@ def validate_session_record(
         return _session_mode_adapter.validate_python(data)
     elif record_type == 'bridge-session':
         return _bridge_session_adapter.validate_python(data)
+    elif record_type == 'tag':
+        return _tag_adapter.validate_python(data)
+    elif record_type == 'agent-color':
+        return _agent_color_adapter.validate_python(data)
+    elif record_type == 'agent-setting':
+        return _agent_setting_adapter.validate_python(data)
+    elif record_type == 'isolation-latch':
+        return _isolation_latch_adapter.validate_python(data)
+    elif record_type == 'speculation-accept':
+        return _speculation_accept_adapter.validate_python(data)
+    elif record_type == 'content-replacement':
+        return _content_replacement_adapter.validate_python(data)
+    elif record_type == 'fork-context-ref':
+        return _fork_context_ref_adapter.validate_python(data)
     elif record_type == 'attachment':
         return _attachment_adapter.validate_python(data)
     else:
