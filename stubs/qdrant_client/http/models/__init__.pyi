@@ -82,8 +82,8 @@ class PointStruct:
     ) -> None: ...
 
 class MatchAny:
-    any: Sequence[str]
-    def __init__(self, any: Sequence[str], **kwargs: Any) -> None: ...
+    any: Sequence[str | int]
+    def __init__(self, any: Sequence[str | int], **kwargs: Any) -> None: ...
 
 class MatchText:
     text: str

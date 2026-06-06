@@ -413,7 +413,7 @@ class QdrantClient:
             Filter(
                 must=[
                     FieldCondition(key='source_path', match=MatchValue(value=source_path)),
-                    FieldCondition(key='chunk_index', match=MatchAny(any=list(chunk_indices))),  # type: ignore[arg-type]  # stub types MatchAny.any as Sequence[str]; chunk_index is an int payload and Qdrant matches int lists
+                    FieldCondition(key='chunk_index', match=MatchAny(any=list(chunk_indices))),
                 ]
             )
             for source_path, chunk_indices in targets.items()
