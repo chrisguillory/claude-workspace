@@ -29,6 +29,18 @@ class PayloadSchemaType(str, Enum):
     BOOL = 'bool'
     DATETIME = 'datetime'
 
+class IntegerIndexType(str, Enum):
+    INTEGER = 'integer'
+
+class IntegerIndexParams:
+    type: IntegerIndexType
+    on_disk: bool | None
+    def __init__(self, type: IntegerIndexType, on_disk: bool | None = None, **kwargs: Any) -> None: ...
+
+# Subset of the upstream union — the arms this codebase builds. Bare PayloadSchemaType
+# selects index defaults; IntegerIndexParams carries options like on_disk.
+type PayloadFieldSchema = PayloadSchemaType | IntegerIndexParams
+
 class Fusion(str, Enum):
     RRF = 'rrf'
 

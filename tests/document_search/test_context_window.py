@@ -1,10 +1,3 @@
-"""Tests for grep-style neighbor-context resolution and target expansion.
-
-Locks in the boundary, hit-exclusion, and overlap-dedup semantics of the two pure
-functions backing ``-C``/``-B``/``-A`` — edge cases the live-collection end-to-end
-run can't deterministically stage.
-"""
-
 from __future__ import annotations
 
 from document_search.search_config import neighbor_chunk_targets, resolve_context_window

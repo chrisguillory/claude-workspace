@@ -75,11 +75,8 @@ def neighbor_chunk_targets(
 ) -> Mapping[str, frozenset[int]]:
     """Compute which adjacent chunks to fetch as ``grep``-style context for the hits.
 
-    Given each hit's ``(source_path, chunk_index)``, expand a window of ``before``
-    preceding and ``after`` following ``chunk_index`` in the same document. The result
-    maps each ``source_path`` to the set of neighbor chunk indices to fetch.
-
-    Boundary and dedup semantics:
+    Maps each ``source_path`` to the set of neighbor chunk indices to fetch. Boundary
+    and dedup semantics:
 
     - Indices below ``0`` are dropped (no chunk precedes the first) — fail-soft at the
       lower document boundary. The upper boundary needs no clamp here: an index past the
@@ -87,7 +84,7 @@ def neighbor_chunk_targets(
     - A neighbor that is itself a hit is excluded — the match is already returned as a
       hit, so re-emitting it as context would duplicate it.
     - Overlapping windows collapse: ``frozenset`` dedups, so a chunk in two hits' windows
-      is fetched once (each hit still references it as its own before/after at assignment).
+      is fetched once.
 
     ``before == after == 0`` yields an empty mapping (the no-context default).
     """

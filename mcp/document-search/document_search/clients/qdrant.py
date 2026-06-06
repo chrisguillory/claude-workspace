@@ -26,27 +26,19 @@ from qdrant_client.http.models import (
     Filter,
     Fusion,
     FusionQuery,
+    IntegerIndexParams,
+    IntegerIndexType,
     MatchAny,
     MatchValue,
     Modifier,
     OptimizersConfigDiff,
+    PayloadFieldSchema,
+    PayloadSchemaType,
     PointStruct,
     Prefetch,
     SparseVector,
     SparseVectorParams,
     VectorParams,
-)
-
-# Index-params types live in the .models submodule and aren't re-exported through the
-# package's `from .models import *` (no __all__), so the package path isn't mypy-visible
-# for them. Import the index-schema set from the submodule together so PayloadSchemaType
-# is the same type identity the PayloadFieldSchema union references (the package alias is
-# a distinct symbol to mypy).
-from qdrant_client.http.models.models import (
-    IntegerIndexParams,
-    IntegerIndexType,
-    PayloadFieldSchema,
-    PayloadSchemaType,
 )
 
 from document_search.clients import _retry
@@ -410,10 +402,9 @@ class QdrantClient:
     ) -> Sequence[SearchResultDict]:
         """Retrieve chunks by exact ``(source_path, chunk_index)``.
 
-        Fetches the union of ``{source_path: chunk_indices}`` in one scroll via an
-        OR-of-ANDs payload filter (each clause pins one ``source_path`` and matches its
-        requested ``chunk_index`` set). Used to pull neighboring-chunk context for search
-        hits. Returns ``score=0.0`` — these are exact lookups, not similarity matches.
+        Fetches the union of ``{source_path: chunk_indices}`` in one scroll, one
+        OR-of-ANDs clause per ``source_path``. Returns ``score=0.0`` — these are exact
+        lookups, not similarity matches.
 
         Indices with no stored chunk (e.g. past a document's last chunk) match nothing
         and are silently absent — the caller treats missing neighbors as a soft boundary.
@@ -422,7 +413,7 @@ class QdrantClient:
             Filter(
                 must=[
                     FieldCondition(key='source_path', match=MatchValue(value=source_path)),
-                    FieldCondition(key='chunk_index', match=MatchAny(any=list(chunk_indices))),  # type: ignore[arg-type]  # MatchAny.any union resolves to the str arm; chunk_index is an int payload, Qdrant matches int lists (tested)
+                    FieldCondition(key='chunk_index', match=MatchAny(any=list(chunk_indices))),  # type: ignore[arg-type]  # stub types MatchAny.any as Sequence[str]; chunk_index is an int payload and Qdrant matches int lists
                 ]
             )
             for source_path, chunk_indices in targets.items()

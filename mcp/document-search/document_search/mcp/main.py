@@ -340,9 +340,8 @@ Args:
     min_score: Minimum cross-encoder relevance score. The reranker produces
         raw logits where negative = irrelevant, positive = relevant.
         Use 0.0 for "only relevant results", higher for stricter filtering.
-    context: Neighboring-chunk context (grep -C): also return this many chunks on
-        each side of every hit, from the same document. before/after override per
-        direction. Default 0 (no context).
+    context: Return this many chunks on each side of every hit, from the same
+        document (grep -C). before/after override per direction. Default 0 (no context).
     before: Chunks before each hit (grep -B). Overrides context for the before side.
     after: Chunks after each hit (grep -A). Overrides context for the after side.
     snippet_chars: Truncate each hit's text to N characters (>= 1), appending an
