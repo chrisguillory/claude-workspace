@@ -5,7 +5,6 @@ __all__ = [
 ]
 
 import asyncio
-import base64
 import contextlib
 import io
 import json
@@ -37,6 +36,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 from . import chrome_profile_state_export
 from .chrome_profiles import list_all_profiles
+from .full_page_screenshot import capture_full_page
 from .helpers import (
     ARIA_HIDDEN_REASON_KEYS,
     VISUAL_HIDDEN_REASON_KEYS,
@@ -76,6 +76,7 @@ from .models import (
     ProxyConfig,
     RequestTiming,
     SaveProfileStateResult,
+    ScreenshotMode,
     ScrollBehavior,
     ScrollDirection,
     ScrollPosition,
@@ -551,7 +552,7 @@ class BrowserService:
             return page_html
 
     @tool_registry.register_tool
-    async def screenshot(self, filename: str, full_page: bool = False) -> str:
+    async def screenshot(self, filename: str, mode: ScreenshotMode = 'viewport') -> str:
         """Capture visual screenshot for verification and debugging.
 
         Use cases:
@@ -562,40 +563,29 @@ class BrowserService:
 
         Args:
             filename: Output filename (e.g., "checkout-page.png")
-            full_page: True for entire scrollable page, False for viewport only
+            mode: 'viewport' (visible area only), or one of two full-page modes that scroll and stitch
+                viewport tiles to capture the whole scrollable page: 'full_page' warms up lazy
+                cross-origin content (GitHub Mermaid/math) first, 'full_page_fast' skips that warm-up
+                (faster, but below-the-fold lazy content may be blank).
 
         Returns:
             Absolute path to saved screenshot (use Read tool to view)
-
-        Note: Requires vision processing. full_page=True uses CDP Page.captureScreenshot.
         """
         driver = await self.get_browser()
-
         screenshot_path = self.state.screenshot_dir / sanitize_filename(filename, 'screenshot')
 
-        if full_page:
-            logger.info('Taking full-page screenshot: %s', filename)
-            # Use CDP to capture full page
-            result = await asyncio.to_thread(
-                driver.execute_cdp_cmd,
-                'Page.captureScreenshot',
-                {'captureBeyondViewport': True},
-            )
-
-            if 'data' not in result:
-                raise fastmcp.exceptions.ToolError(
-                    'CDP full-page capture returned no data. Use full_page=False for viewport screenshot.',
-                )
-
-            screenshot_data = base64.b64decode(result['data'])
-            screenshot_path.write_bytes(screenshot_data)
-            logger.info('Full-page screenshot saved to %s', screenshot_path)
+        if mode == 'viewport':
+            logger.info('Taking viewport screenshot: %s', filename)
+            await asyncio.to_thread(driver.save_screenshot, str(screenshot_path))
+            logger.info('Screenshot saved to %s', screenshot_path)
             return str(screenshot_path)
 
-        # Viewport screenshot
-        logger.info('Taking viewport screenshot: %s', filename)
-        await asyncio.to_thread(driver.save_screenshot, str(screenshot_path))
-        logger.info('Screenshot saved to %s', screenshot_path)
+        logger.info('Taking full-page screenshot (%s): %s', mode, filename)
+        screenshot_data = await capture_full_page(
+            driver, trigger_lazy=(mode == 'full_page'), await_network_idle=self.wait_for_network_idle
+        )
+        screenshot_path.write_bytes(screenshot_data)
+        logger.info('Full-page screenshot saved to %s', screenshot_path)
         return str(screenshot_path)
 
     @tool_registry.register_tool

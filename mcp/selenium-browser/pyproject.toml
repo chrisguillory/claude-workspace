@@ -1,6 +1,6 @@
 [project]
 name = "selenium-browser"
-version = "0.9.1"
+version = "0.10.0"
 description = "Selenium Browser Automation MCP Server - CDP stealth injection for Cloudflare bypass"
 requires-python = ">=3.13,<3.14"
 dependencies = [
@@ -15,6 +15,7 @@ dependencies = [
     "pyyaml",
     "selenium",
     "uvicorn>=0.38.0",
+    "pillow>=12.2.0",
 ]
 
 [project.scripts]

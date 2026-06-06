@@ -24,6 +24,7 @@ from cc_lib.types import OutputFormat
 from ..models import (
     Browser,
     ConsoleLogLevelFilter,
+    ScreenshotMode,
     ScrollBehavior,
     ScrollDirection,
     ScrollPosition,
@@ -169,11 +170,14 @@ def wait_for_network_idle(
 @error_boundary
 def screenshot(
     filename: Annotated[str, typer.Argument(help='Output filename.')],
-    full_page: Annotated[bool, typer.Option('--full-page', help='Capture full scrollable page.')] = False,
+    mode: Annotated[
+        ScreenshotMode,
+        typer.Option('--mode', help='viewport, full_page (triggers lazy Mermaid/math), or full_page_fast.'),
+    ] = 'viewport',
     format: Annotated[OutputFormat, typer.Option('--format', '-f', help='Output format.')] = 'text',
 ) -> None:
     """Take a screenshot."""
-    result = _call_tool('screenshot', filename=filename, full_page=full_page)
+    result = _call_tool('screenshot', filename=filename, mode=mode)
     _print_result(result, format)
 
 

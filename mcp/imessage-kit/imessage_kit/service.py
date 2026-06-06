@@ -827,7 +827,8 @@ class IMessageService:
             final_row = self._state.db.get_message_delivery_state(message_rowid)
             if expect_attachments:
                 transfer_states = self._state.db.get_attachment_transfer_states(message_rowid)
-        assert final_row is not None, 'message row disappeared during polling'
+        if final_row is None:
+            raise RuntimeError('message row disappeared during polling')
         return final_row, transfer_states
 
     def _is_terminal_state(

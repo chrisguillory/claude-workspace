@@ -855,7 +855,8 @@ def _get_active_credentials(
     )
 
     if same_process:
-        assert snap is not None
+        if snap is None:
+            raise RuntimeError('same_process is True but snap is None')
 
         # Signal 1: /login in THIS session — process actually changed credentials.
         # Must check first: supersedes switch-pending and config identity checks.

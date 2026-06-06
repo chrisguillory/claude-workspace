@@ -127,7 +127,8 @@ type PermissionMode = Literal[
     'auto',
     'dontAsk',
     'bypassPermissions',
-]
+    'bubble',  # fork/worker built-in agents (gated by tengu_fork_subagent_enabled)
+]  # last updated 2.1.165
 
 type PermissionRuleBehavior = Literal['allow', 'deny', 'ask']
 
