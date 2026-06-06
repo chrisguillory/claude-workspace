@@ -37,6 +37,15 @@ Usage:
 Exit codes:
     0 - No violations found
     1 - Violations found
+
+Known Limitations (static analysis trade-offs):
+    - Free-function form: ``model_copy(obj, update=...)`` (a bare ``ast.Name`` call)
+      is not flagged — only attribute access ``obj.model_copy(...)`` is matched.
+    - Aliased bound method: ``m = obj.model_copy`` then ``m(update=...)`` is missed —
+      the call target is a name, not an attribute named ``model_copy``.
+    - Spread update: ``obj.model_copy(**kwargs)`` carries ``update`` via ``**`` (an
+      ``ast.keyword`` with ``arg=None``), which the ``arg == 'update'`` check skips.
+      (``update`` is keyword-only in Pydantic, so a positional form can't occur.)
 """
 
 from __future__ import annotations
