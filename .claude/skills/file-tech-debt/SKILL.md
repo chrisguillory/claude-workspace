@@ -32,6 +32,18 @@ This is the **sink for findings-workflow's "defer with ticket" verdict** — sam
 severity vocabulary (BUG, SECURITY, PERFORMANCE, MAINTAINABILITY, ARCHITECTURE × CRITICAL,
 HIGH, MEDIUM, LOW), inverted target: an issue in the tracker, not a fix in the tree.
 
+## When NOT to file — just fix inline
+
+File only what's **costly or risky from a *human* perspective** — a big refactor, a
+cross-cutting change, something needing a real decision or prioritization call. The test is
+**"is this costly/risky for a human?"** — not "is this outside the current diff?"
+Out-of-scope ≠ file-worthy.
+
+Do **not** file cheap, low-risk, mechanical fixes an agent can just do now — **especially
+anything in the stub layer or other repo-owned infrastructure we fully control, with no
+production risk.** Fix those inline, never defer them. Filing a near-zero-cost fix is pure
+overhead: an issue to triage and later pick up, for work that was cheaper to just do.
+
 ## Gathered context
 
 !`.claude/skills/file-tech-debt/gather-debt-context.py`
@@ -192,5 +204,6 @@ issue's session footer reopens the original reasoning if the headline isn't enou
 - **Inlining the body** (`--body "$(cat …)"`) — shell-escaping bites; use `--body-file`.
 - **Bare `#N` / `@name`** in generated text — `#N` links to issue N and `@name` pings;
   backtick generated ones, reserve bare for deliberate cross-references.
-- **Filing what you should just fix** — if it's a one-line fix in flow, fix it. This is for
-  debt that *would* derail the session.
+- **Filing what you should just fix** — cheap, low-risk, mechanical fixes (especially in the
+  stub layer or repo-owned infra with no production risk) get done inline, not deferred. The
+  bar is human cost/risk, not out-of-scope-ness. File only what would derail the session.
