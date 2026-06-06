@@ -79,6 +79,10 @@ type ScrollBehavior = Literal['instant', 'smooth']
 # Element-state target for wait_for_selector
 type WaitForSelectorState = Literal['visible', 'hidden', 'attached', 'detached']
 
+# Screenshot capture mode (used by service.py, tools/browser_management.py, cli/main.py).
+# 'full_page' triggers lazy cross-origin content (GitHub Mermaid/math); 'full_page_fast' skips that warm-up.
+type ScreenshotMode = Literal['viewport', 'full_page', 'full_page_fast']
+
 # Console-log severity. Filter parameters accept the synthetic 'ALL' sentinel
 # (meaning "no filtering"); ConsoleLogEntry.level itself never carries 'ALL'.
 type ConsoleLogLevel = Literal['SEVERE', 'WARNING', 'INFO']
