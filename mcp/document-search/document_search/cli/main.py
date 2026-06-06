@@ -37,11 +37,18 @@ from document_search.schemas.vectors import (
     CollectionMetadata,
     EmbeddingInfo,
     IndexInfo,
+    SearchHit,
     SearchQuery,
     SearchResult,
     SearchType,
 )
-from document_search.search_config import MAX_SEARCH_RESULTS, clamp_search_limit, format_snippet, rerank_candidate_count
+from document_search.search_config import (
+    MAX_SEARCH_RESULTS,
+    clamp_search_limit,
+    format_snippet,
+    rerank_candidate_count,
+    resolve_context_window,
+)
 from document_search.search_path import (
     ResolvedPaths,
     resolve_filter_paths,
@@ -350,6 +357,23 @@ def search(
     min_score: Annotated[
         float | None, typer.Option('--min-score', help='Minimum relevance score (0.0 = relevant).')
     ] = None,
+    context: Annotated[
+        int,
+        typer.Option(
+            '--context',
+            '-C',
+            min=0,
+            help='Also show N neighbor chunks on each side of every hit (grep -C). -A/-B override per side.',
+        ),
+    ] = 0,
+    before: Annotated[
+        int | None,
+        typer.Option('--before', '-B', min=0, help='Neighbor chunks before each hit (grep -B). Overrides -C before.'),
+    ] = None,
+    after: Annotated[
+        int | None,
+        typer.Option('--after', '-A', min=0, help='Neighbor chunks after each hit (grep -A). Overrides -C after.'),
+    ] = None,
     snippet_chars: Annotated[
         int | None,
         typer.Option(
@@ -376,6 +400,8 @@ def search(
         document-search search "config" --exclude /path/to/noise/
         document-search search "retry logic" --min-score 0.0
         document-search search "deploy steps" --file-type markdown
+        document-search search "rate limiter" -C 1
+        document-search search "rate limiter" -B 2 -A 0
     """
     asyncio.run(
         _search_async(
@@ -387,6 +413,9 @@ def search(
             file_types,
             exclude_paths,
             min_score,
+            context,
+            before,
+            after,
             snippet_chars,
             search_timeout,
             format,
@@ -692,6 +721,18 @@ async def _clear_async(
         typer.echo(f'  Chunks: {result.chunks_removed}')
 
 
+def _render_neighbor(neighbor: SearchHit, snippet_chars: int | None) -> None:
+    """Render a context chunk subordinate to its hit — dimmed, gutter-marked by chunk_index.
+
+    Keeps the actual match visually dominant (bold, un-guttered): neighbors are dim with a
+    ``·`` gutter and a ``~ chunk N`` marker, so hit vs. context is unambiguous in the terminal.
+    """
+    typer.secho(f'       · ~ chunk {neighbor.chunk_index}', fg=typer.colors.BRIGHT_BLACK)
+    snippet = format_snippet(neighbor.text, max_chars=snippet_chars)
+    for line in snippet.split('\n'):
+        typer.secho(f'       · {line}', fg=typer.colors.BRIGHT_BLACK)
+
+
 async def _search_async(
     query: str,
     collection_name: str,
@@ -701,6 +742,9 @@ async def _search_async(
     file_types: Sequence[FileType] | None,
     exclude_paths: Sequence[str],
     min_score: float | None,
+    context: int,
+    before: int | None,
+    after: int | None,
     snippet_chars: int | None,
     search_timeout: int | None,
     format: OutputFormat,
@@ -777,6 +821,13 @@ async def _search_async(
                 filtered = [h for h in result.hits if h.score >= min_score]
                 result = SearchResult(hits=filtered, total=len(filtered))
 
+            # Attach neighbor context on the final hit set (after rerank + min_score).
+            before_count, after_count = resolve_context_window(context=context, before=before, after=after)
+            hits_with_context = await repository.fetch_neighbors(
+                result.hits, before=before_count, after=after_count, search_timeout=search_timeout
+            )
+            result = SearchResult(hits=hits_with_context, total=result.total)
+
             if format == 'json':
                 typer.echo(result.model_dump_json(indent=2))
                 return
@@ -788,12 +839,16 @@ async def _search_async(
             typer.secho(f'{result.total} results:', bold=True)
             typer.echo()
             for hit in result.hits:
+                for neighbor in hit.before:
+                    _render_neighbor(neighbor, snippet_chars)
                 typer.secho(f'  {hit.score:.4f}  {hit.source_path}', bold=True)
                 if hit.heading_context:
                     typer.echo(f'         {hit.heading_context}')
                 snippet = format_snippet(hit.text, max_chars=snippet_chars)
                 for line in snippet.split('\n'):
                     typer.echo(f'         {line}')
+                for neighbor in hit.after:
+                    _render_neighbor(neighbor, snippet_chars)
                 typer.echo()
         finally:
             sparse_service.shutdown()
