@@ -17,7 +17,9 @@ from pathlib import Path
 
 def check_path_markers() -> bool:
     """Check all path fields have translation markers."""
-    models_file = (Path(__file__).parent.parent / 'src' / 'schemas' / 'session' / 'models.py').resolve(strict=True)
+    models_file = (Path(__file__).parent.parent / 'claude_session' / 'schemas' / 'session' / 'models.py').resolve(
+        strict=True
+    )
     content = models_file.read_text()
 
     # Fields that should have path markers
@@ -85,7 +87,9 @@ def check_path_markers() -> bool:
 
 def find_potential_path_fields() -> None:
     """Find fields that might contain paths but aren't marked."""
-    models_file = (Path(__file__).parent.parent / 'src' / 'schemas' / 'session' / 'models.py').resolve(strict=True)
+    models_file = (Path(__file__).parent.parent / 'claude_session' / 'schemas' / 'session' / 'models.py').resolve(
+        strict=True
+    )
     content = models_file.read_text()
 
     # Look for str fields that might be paths

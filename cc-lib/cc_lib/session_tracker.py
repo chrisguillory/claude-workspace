@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from collections.abc import Sequence, Set
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,6 +14,7 @@ from cc_lib.os_process import ProcessHandle
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.types import CCVersion, JsonDatetime, SessionSource, SessionState
 from cc_lib.utils import get_claude_workspace_config_home_dir
+from cc_lib.utils.atomic_write import atomic_write
 
 __all__ = [
     'Session',
@@ -407,20 +407,11 @@ def load_sessions(cwd: str) -> SessionDatabase:
 
 
 def save_sessions(cwd: str, db: SessionDatabase) -> None:
-    """Save sessions to sessions.json file using atomic write.
-
-    Uses temp file + rename for atomic operation to prevent corruption.
+    """Save sessions to sessions.json atomically.
 
     Args:
         cwd: Current working directory path
         db: SessionDatabase to save
     """
     sessions_file = get_sessions_file(cwd)
-
-    # Write to temp file in same directory (required for atomic rename)
-    with tempfile.NamedTemporaryFile(mode='w', dir=sessions_file.parent, delete=False, suffix='.tmp') as f:
-        temp_path = Path(f.name)
-        json.dump(db.model_dump(mode='json', exclude_none=True), f, indent=2)
-
-    # Atomic rename
-    temp_path.replace(sessions_file)
+    atomic_write(sessions_file, json.dumps(db.model_dump(mode='json', exclude_none=True), indent=2).encode())
