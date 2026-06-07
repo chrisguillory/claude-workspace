@@ -76,7 +76,7 @@ get four headings):
 - Closing keywords (`Fixes #N`) auto-close **only against the default branch** and fire on
   loose wording — use exactly one per genuinely-closed issue, `Refs #N` for related ones.
 
-**Claude Code Plan (when the session has one)** — the plan is Claude's launch point, not kept live after implementation, so treat it as *auxiliary origin context* parked at the **bottom**, never the headline. **First scan the plan for anything sensitive (tokens, keys, private hostnames/paths) and have the user scrub it** — a gist is URL-reachable; plans are design notes and shouldn't carry secrets, so confirm before it leaves the repo. Then publish the session's plan (a `*plan*.md` written this session, or a path the user names) — the **same** file, never a copy:
+**Claude Code Plan (when the session has one)** — the plan is Claude's launch point, not kept live after implementation, so treat it as *auxiliary origin context* parked at the **bottom**, never the headline. **First scan the plan for anything sensitive — secrets (tokens, keys) *and* personal/identifying details (private hostnames, home-network layout, personal paths, PII) — and have the user scrub it** — a gist is URL-reachable, so confirm before it leaves the repo. Then publish the session's plan (a `*plan*.md` written this session, or a path the user names) — the **same** file, never a copy:
 
 ```bash
 .claude/skills/create-pr/publish-plan.py <plan>
@@ -142,7 +142,7 @@ you keep reviewability during the PR *and* a tidy history after.
 - **No force-push once open** — land follow-ons as new commits so the change-since-last-look stays visible; squash collapses them at merge.
 - **TLDR-first, depth in `<details>`** — write for a ~20-second skim, never a wall.
 - **Session provenance** — end every body with `<sub>Claude Code session <id></sub>` (ID only).
-- **Claude Code Plan** — when the session has one, scrub it for secrets, then publish via `.claude/skills/create-pr/publish-plan.py <plan>` (the *same* file; idempotent slug→id store, no duplicate gists) and link it at the **bottom**; auxiliary origin context.
+- **Claude Code Plan** — when the session has one, scrub it for secrets **and personal/PII details**, then publish via `.claude/skills/create-pr/publish-plan.py <plan>` (the *same* file; idempotent slug→id store, no duplicate gists) and link it at the **bottom**; auxiliary origin context.
 
 ## Anti-patterns
 

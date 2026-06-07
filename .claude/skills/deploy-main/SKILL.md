@@ -1,8 +1,8 @@
 ---
 name: deploy-main
 description: "Deploy origin/main across the home mesh fleet — merge the latest trunk into every
-  checkout on a target. Dry-runs and presents the plan first, applies on your go, reports conflicts
-  for triage. Use when rolling a merged change out to the other Macs (M2-M5)."
+  checkout on a target. Applies by default (clean merges land, conflicts abort untouched, dirty is
+  skipped) and reports; --dry-run previews first. Use when rolling a merged change out to the fleet."
 argument-hint: "[crb target — e.g. mac-others | M2 | M2,M3 | mac-mesh]"
 user-invocable: true
 disable-model-invocation: false
@@ -17,37 +17,31 @@ Merge the latest `origin/main` into every checkout (the main working tree's bran
 worktree) on the target hosts, via the deterministic `deploy-main` CLI (`scripts/deploy-main.py`).
 
 **The line:** the CLI owns all git/crb mechanics — enumeration, `merge-tree` classification, clean
-merge, conflict-abort, skip-dirty, the typed report. This skill owns the judgment — present the plan,
-gate the apply, triage conflicts.
+merge, conflict-abort, skip-dirty, the typed report. This skill owns the judgment — run it, read the
+report, triage conflicts. The deploy is **not gated**: the protections (clean-only merge,
+conflict-abort, dirty-skip) are the safety, so the default applies. `--dry-run` is there only if you
+want to look before you leap.
 
 If `deploy-main` isn't on PATH: `scripts/install-launcher.sh scripts/deploy-main.py` (or run
 `scripts/deploy-main.py` directly).
 
-## Phase 1: Dry-run + present
+## Phase 1: Deploy + report
 
-Classify without mutating, then show the fleet:
-
-```bash
-deploy-main <target> --dry-run --format json
-```
-
-Parse the `DeployResult` and present a per-host table. Status values:
-`would-merge` (clean, would land) · `conflict` (with the colliding files) · `skip-dirty`
-(uncommitted work — untouched) · `current` (already has main). Call out the conflicts and dirties
-explicitly — those are what the user weighs.
-
-## Phase 2: Apply (on the user's go)
-
-Once the user confirms, run the deploy — applies clean merges, aborts conflicts, skips dirty:
+Run the deploy — clean merges land, conflicts abort untouched, dirty/current are skipped:
 
 ```bash
 deploy-main <target> --format json
 ```
 
-Report what landed (`merged` → new short SHA) and what was left for triage (`conflict` /
-`apply-aborted`). Re-running is safe and converges.
+Parse the `DeployResult` and present the per-host outcome: `merged` (→ new short SHA) ·
+`conflict` (with the colliding files) · `skip-dirty` (uncommitted work — untouched) · `current`
+(already has main). Call out conflicts and dirties — those are what you weigh next. Re-running is
+safe and converges.
 
-## Phase 3: Triage conflicts
+**Want to look first?** `deploy-main <target> --dry-run --format json` classifies without mutating
+(`would-merge` in place of `merged`). It's opt-in, not the default — the protections are the safety.
+
+## Phase 2: Triage conflicts
 
 For each `conflict`, decide with the user — never auto-resolve a non-trivial one:
 

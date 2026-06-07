@@ -36,16 +36,11 @@ VIEW_URL = re.compile(r'View:\s*(https://gisthost\.github\.io/\?([0-9a-f]+)/\S+)
 
 @ErrorBoundary(exit_code=1)
 def main() -> None:
-    plan = Path(sys.argv[1]).expanduser().resolve()
-    if not plan.is_file():
-        raise FileNotFoundError(f'plan not found: {plan}')
-
+    plan = Path(sys.argv[1]).expanduser().resolve(strict=True)
     slug = plan.stem
-    with diskcache.Cache(str(STORE)) as store:
-        gist_id: str | None = store.get(slug)
-        view_url, minted_id = _publish(plan, gist_id)
-        if gist_id is None:
-            store[slug] = minted_id  # associate the freshly-minted id with this plan
+    with diskcache.Cache(STORE.as_posix()) as store:
+        view_url, gist_id = _publish(plan, store.get(slug))
+        store[slug] = gist_id  # remember the id so re-runs reuse this gist
     print(view_url)
 
 
