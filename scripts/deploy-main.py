@@ -23,8 +23,8 @@ working tree's branch + every linked worktree), classifies and merges ``origin/m
 
 The merge IS the deploy: a new skill or lib fix on main lands where each machine is working. A
 dirty checkout still merges when its edits don't touch the incoming files — deploy-main only steps
-aside when git itself would refuse (the ``blocked-*`` cases), reporting exactly which files. Nothing
-is ever forced; conflicts and blocks are left for you (or the on-host AI) to triage. Classification
+aside when git itself would refuse (the ``blocked-*`` cases), reporting exactly which files.
+Conflicts and blocks are never forced — left for you (or the on-host AI) to triage. Classification
 uses ``git merge-tree --write-tree`` (in-memory) plus a working-tree overlap check; the only mutation
 is a clean ``git merge`` (with ``--abort`` as a safety net). Per-host, idempotent — re-run converges.
 
@@ -177,16 +177,18 @@ overlap() {  # $1=set $2=candidates -> candidates that appear in set (non-empty 
     !s{if($0!="")a[$0]=1;next}
     ($0 in a)'
 }
-git worktree list --porcelain | awk '/^worktree /{print $2}' | while IFS= read -r d; do
+git worktree list --porcelain | sed -n 's/^worktree //p' | while IFS= read -r d; do
   br=$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null || echo DETACHED)
   if git -C "$d" merge-base --is-ancestor "$REF" HEAD 2>/dev/null; then
     printf 'CHECKOUT\t%s\t%s\tcurrent\t\n' "$d" "$br"; continue
   fi
-  if ! git -C "$d" merge-tree --write-tree HEAD "$REF" >/dev/null 2>&1; then
+  mt=$(git -C "$d" merge-tree --write-tree HEAD "$REF" 2>/dev/null) || {
     files=$(git -C "$d" merge-tree --write-tree --name-only HEAD "$REF" 2>/dev/null | sed -n '2,/^$/p' | grep -v '^$' | paste -sd, -)
     printf 'CHECKOUT\t%s\t%s\tconflict\t%s\n' "$d" "$br" "$files"; continue
-  fi
-  inc=$(git -C "$d" diff --name-only HEAD "$REF" 2>/dev/null)
+  }
+  # overlap against the merge-RESULT tree (what the merge actually writes), not the raw HEAD..REF
+  # diff — the latter also lists files the checkout's own commits changed, which the merge won't touch.
+  inc=$(git -C "$d" diff --name-only HEAD "$mt" 2>/dev/null)
   bl=$(overlap "$inc" "$(git -C "$d" diff --name-only HEAD 2>/dev/null)" | paste -sd, -)
   if [ -n "$bl" ]; then printf 'CHECKOUT\t%s\t%s\tblocked-local\t%s\n' "$d" "$br" "$bl"; continue; fi
   bu=$(overlap "$inc" "$(git -C "$d" ls-files --others --exclude-standard 2>/dev/null)" | paste -sd, -)

@@ -41,7 +41,8 @@ Parse the `DeployResult` and present the per-host outcome:
 - `current` — already has main.
 - `conflict` (+ files) — commit-level merge conflict; aborted, untouched.
 - `blocked-local` (+ files) — uncommitted **tracked** edits overlap the incoming change; git refuses.
-- `blocked-untracked` (+ files) — **untracked** files collide with incoming; git refuses (won't clobber them).
+- `blocked-untracked` (+ files) — **untracked** files collide with incoming; git refuses (won't clobber them — *except git-ignored files, which it deems expendable and overwrites*).
+- `apply-aborted` — apply hit a blocker the dry-run couldn't foresee (a case-only filename collision on macOS's case-insensitive FS, or state that moved since the preview); the checkout is left untouched — re-run or inspect.
 
 Call out everything that isn't `merged`/`current` — those are what you weigh next. Re-running is safe
 and converges.
