@@ -79,13 +79,6 @@ GRANOLA_MCP_DIR = Path.home() / 'granola-mcp'
 # ---------------------------------------------------------------------------
 
 
-class DocumentSetEntry(SubsetModel):
-    """Lightweight entry from /v1/get-document-set."""
-
-    updated_at: str | None = None
-    owner: bool | None = None
-
-
 class Meeting(SubsetModel):
     """Meeting metadata from /v1/get-documents-batch."""
 
@@ -93,6 +86,7 @@ class Meeting(SubsetModel):
     title: str | None = None
     created_at: str | None = None
     deleted_at: str | None = None
+    notes_markdown: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -125,24 +119,39 @@ def get_auth_headers() -> Mapping[str, str]:
 
 
 def _fetch_meeting_list(client: httpx.Client, headers: Mapping[str, str]) -> Sequence[Mapping[str, Any]]:
-    """Fetch all meetings from Granola API.
+    """Fetch all accessible meetings from Granola API.
 
-    Two-step process matching the Granola MCP server:
-    1. POST /v1/get-document-set {} → lightweight index of all doc IDs
-    2. POST /v1/get-documents-batch {document_ids: [...]} → full details (chunks of 200)
+    Three-step process:
+    1. POST /v1/get-document-set {} → lightweight index of every doc ID the
+       account sees directly (owned + shared into the set)
+    2. POST /v1/get-document-lists-metadata → doc IDs from workspace-visibility
+       meeting lists (colleagues' meetings shared to the workspace)
+    3. POST /v1/get-documents-batch {document_ids: [...]} → full details
     """
-    # Step 1: lightweight index
+    # Step 1: document-set index
     index_resp = client.post(f'{GRANOLA_API}/v1/get-document-set', json={}, headers=headers)
     index_resp.raise_for_status()
-    doc_index = index_resp.json()
+    set_ids = list(index_resp.json().get('documents', {}).keys())
 
-    # Extract owned document IDs
-    doc_ids = [
+    # Step 2: workspace-shared meeting lists
+    lists_resp = client.post(
+        f'{GRANOLA_API}/v1/get-document-lists-metadata',
+        json={'include_document_ids': True, 'include_only_joined_lists': False},
+        headers=headers,
+    )
+    lists_resp.raise_for_status()
+    shared_ids = [
         doc_id
-        for doc_id, entry in doc_index.get('documents', {}).items()
-        if DocumentSetEntry.model_validate(entry).owner is True
+        for entry in lists_resp.json().get('lists', {}).values()
+        if entry.get('visibility') == 'workspace'
+        for doc_id in entry.get('document_ids', [])
     ]
-    print(f'Found {len(doc_ids)} owned documents in index', file=sys.stderr)
+
+    doc_ids = list(dict.fromkeys([*set_ids, *shared_ids]))
+    print(
+        f'Found {len(doc_ids)} accessible documents ({len(set_ids)} in set, {len(shared_ids)} via shared lists)',
+        file=sys.stderr,
+    )
 
     # Step 2: batch fetch full details. api.granola.ai now caps get-documents-batch
     # below 100 ids/request (HTTP 400 otherwise); granola-mcp uses 40.
@@ -215,13 +224,11 @@ def _prosemirror_to_markdown(content: Mapping[str, Any], depth: int = 0) -> str:
 # ---------------------------------------------------------------------------
 
 
-def download_note(client: httpx.Client, document_id: str, headers: Mapping[str, str]) -> str | None:
+def download_note(client: httpx.Client, meeting: Meeting, headers: Mapping[str, str]) -> str | None:
     """Download AI-generated meeting notes. Returns None if no panels exist."""
-    document = _get_document(client, document_id, headers)
-
     panels_resp = client.post(
         f'{GRANOLA_API}/v1/get-document-panels',
-        json={'document_id': document_id},
+        json={'document_id': meeting.id},
         headers=headers,
     )
     panels_resp.raise_for_status()
@@ -247,18 +254,16 @@ def download_note(client: httpx.Client, document_id: str, headers: Mapping[str, 
     else:
         notes_md = _prosemirror_to_markdown(content)
 
-    date_str = _format_date(document.get('created_at', ''), '%a, %d %b %y')
-    title = document.get('title') or '(Untitled)'
+    date_str = _format_date(meeting.created_at or '', '%a, %d %b %y')
+    title = meeting.title or '(Untitled)'
     return f'# {title}\n\n{date_str}\n\n{notes_md}'
 
 
-def download_transcript(client: httpx.Client, document_id: str, headers: Mapping[str, str]) -> str | None:
+def download_transcript(client: httpx.Client, meeting: Meeting, headers: Mapping[str, str]) -> str | None:
     """Download meeting transcript. Returns None if transcript doesn't exist."""
-    document = _get_document(client, document_id, headers)
-
     resp = client.post(
         f'{GRANOLA_API}/v1/get-document-transcript',
-        json={'document_id': document_id},
+        json={'document_id': meeting.id},
         headers=headers,
     )
     resp.raise_for_status()
@@ -267,8 +272,8 @@ def download_transcript(client: httpx.Client, document_id: str, headers: Mapping
     if not segments:
         return None
 
-    title = document.get('title') or '(Untitled)'
-    date_str = _format_date(document.get('created_at', ''), '%b %-d')
+    title = meeting.title or '(Untitled)'
+    date_str = _format_date(meeting.created_at or '', '%b %-d')
 
     lines = [f'Meeting Title: {title}', f'Date: {date_str}', '', 'Transcript:', ' ']
 
@@ -292,16 +297,14 @@ def download_transcript(client: httpx.Client, document_id: str, headers: Mapping
     return '\n'.join(lines)
 
 
-def download_private_notes(client: httpx.Client, document_id: str, headers: Mapping[str, str]) -> str | None:
-    """Download private notes. Returns None if no private notes exist."""
-    document = _get_document(client, document_id, headers)
-
-    if not document.get('notes_markdown'):
+def download_private_notes(meeting: Meeting) -> str | None:
+    """Format private notes from batch metadata. Returns None if none exist."""
+    if not meeting.notes_markdown:
         return None
 
-    date_str = _format_date(document.get('created_at', ''), '%a, %d %b %y')
-    title = document.get('title') or '(Untitled)'
-    return f'# {title}\n\n{date_str}\n\n{document["notes_markdown"]}'
+    date_str = _format_date(meeting.created_at or '', '%a, %d %b %y')
+    title = meeting.title or '(Untitled)'
+    return f'# {title}\n\n{date_str}\n\n{meeting.notes_markdown}'
 
 
 # ---------------------------------------------------------------------------
@@ -406,17 +409,6 @@ def format_output(
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
-
-
-def _get_document(client: httpx.Client, document_id: str, headers: Mapping[str, str]) -> Mapping[str, Any]:
-    """Fetch a single document's metadata."""
-    resp = client.post(f'{GRANOLA_API}/v2/get-documents', json={'id': document_id}, headers=headers)
-    resp.raise_for_status()
-    data = resp.json()
-    if not data.get('docs'):
-        raise ValueError(f'Document {document_id} not found')
-    document: Mapping[str, Any] = data['docs'][0]
-    return document
 
 
 def _format_date(iso_timestamp: str, fmt: str) -> str:
@@ -550,7 +542,7 @@ def main() -> int:
             created = meeting.created_at or ''
             print(f'[{i}/{len(to_process)}] {title[:60]}', file=sys.stderr)
 
-            note = download_note(client, mid, headers)
+            note = download_note(client, meeting, headers)
             if note:
                 (MEETINGS_DIR / f'{mid}-note.md').write_text(note, encoding='utf-8')
                 print(f'  Note: {len(note)} bytes', file=sys.stderr)
@@ -558,14 +550,14 @@ def main() -> int:
                 skipped_notes.append((title, created))
                 print('  No note available', file=sys.stderr)
 
-            transcript = download_transcript(client, mid, headers)
+            transcript = download_transcript(client, meeting, headers)
             if transcript:
                 (MEETINGS_DIR / f'{mid}-transcript.md').write_text(transcript, encoding='utf-8')
                 print(f'  Transcript: {len(transcript)} bytes', file=sys.stderr)
             else:
                 print('  No transcript available', file=sys.stderr)
 
-            private = download_private_notes(client, mid, headers)
+            private = download_private_notes(meeting)
             if private:
                 (MEETINGS_DIR / f'{mid}-private.md').write_text(private, encoding='utf-8')
                 print(f'  Private notes: {len(private)} bytes', file=sys.stderr)
