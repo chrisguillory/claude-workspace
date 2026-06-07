@@ -42,7 +42,7 @@ class TestRegistry:
         regression test. With bare pid_exists this stale entry would survive; the
         ProcessHandle create_time match is what filters it.
         """
-        recycled = info.model_copy(update={'created_at': info.created_at - timedelta(hours=1)})
+        recycled = info.__replace__(created_at=info.created_at - timedelta(hours=1))
         async with register(recycled):
             assert list(read_all(recycled.session_id)) == []
 
