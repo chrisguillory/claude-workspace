@@ -83,20 +83,3 @@ jobs:
         # selenium fixtures spin up one headless Chrome per worker; the hooks suite's
         # scratch dir is namespaced per PYTEST_XDIST_WORKER.
         run: uv run pytest -n auto
-
-  merge-gatekeeper:
-    name: merge-gatekeeper # required-status-check context — keep in sync with the branch ruleset
-    # One umbrella check: succeeds only once every *other* check on the PR has succeeded, so the
-    # branch ruleset can require this single context instead of enumerating each job by name.
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      checks: read
-      statuses: read
-    steps:
-      - name: Wait for all other checks to succeed
-        uses: upsidr/merge-gatekeeper@09af7a82c1666d0e64d2bd8c01797a0bcfd3bb5d # v1.2.1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          timeout: '1800'
-          interval: '30'

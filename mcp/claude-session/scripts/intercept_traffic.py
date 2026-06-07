@@ -347,9 +347,7 @@ def _write_manifest(session_dir: Path, session: Session | None) -> None:
             'transcript_path': session.transcript_path,
             'source': session.source,
             'claude_pid': session.metadata.claude_pid,
-            'process_created_at': session.metadata.process_created_at.isoformat()
-            if session.metadata.process_created_at
-            else None,
+            'process_created_at': session.metadata.process_created_at.isoformat(),
         }
 
     manifest_path = session_dir / 'manifest.json'

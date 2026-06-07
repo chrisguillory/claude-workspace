@@ -84,6 +84,17 @@ EXPECTED_REEXPORT: CodeMap = {
 }
 
 
+# -- replace: paths + expectations --------------------------------------------
+
+REPLACE = LINTERS_DIR / 'replace_linter.py'
+REPLACE_FIXTURE = EDGE_CASES_DIR / 'replace_unused_directives.py'
+
+EXPECTED_REPLACE: CodeMap = {
+    'used_model_copy_update': 'model-copy-update',
+    'unused_model_copy_update': 'model-copy-update',
+}
+
+
 # -- strict_typing: paths + expectations --------------------------------------
 
 STRICT_TYPING = LINTERS_DIR / 'strict_typing_linter.py'
@@ -126,6 +137,7 @@ STRUCTURAL_CASES: Sequence[StructuralCase] = [
 COVERAGE_SPECS: Sequence[tuple[Path, str, CodeMap, Sequence[StructuralCase]]] = [
     (EXCEPTION_SAFETY, 'ERROR_CODES', EXPECTED_EXCEPTION_SAFETY, ()),
     (REEXPORT, 'ERROR_CODES', EXPECTED_REEXPORT, ()),
+    (REPLACE, 'ERROR_CODES', EXPECTED_REPLACE, ()),
     (STRICT_TYPING, 'CODE_TO_KINDS', EXPECTED_STRICT_TYPING_TYPE, STRUCTURAL_CASES),
 ]
 
@@ -146,6 +158,14 @@ def reexport_unused() -> DirectiveScan:
     """Run reexport with --report-unused-directives once; return (lines, flagged)."""
     output = run_linter(REEXPORT_FIXTURE, REEXPORT, report_unused=True)
     lines = {entry: _reexport_directive_line(REEXPORT_FIXTURE, entry) for entry in EXPECTED_REEXPORT}
+    return lines, parse_unused_directives(output)
+
+
+@pytest.fixture(scope='module')
+def replace_unused() -> DirectiveScan:
+    """Run replace with --report-unused-directives once; return (lines, flagged)."""
+    output = run_linter(REPLACE_FIXTURE, REPLACE, report_unused=True)
+    lines = _directive_lines(REPLACE_FIXTURE, REPLACE, EXPECTED_REPLACE)
     return lines, parse_unused_directives(output)
 
 
@@ -184,6 +204,19 @@ def test_reexport_no_unexpected(reexport_unused: DirectiveScan) -> None:
     """Only the unused_ entry's directive line is flagged."""
     lines, unused = reexport_unused
     _assert_no_strays(EXPECTED_REEXPORT, lines, unused)
+
+
+@pytest.mark.parametrize('entity', EXPECTED_REPLACE, ids=list(EXPECTED_REPLACE))
+def test_replace_directive(entity: str, replace_unused: DirectiveScan) -> None:
+    """The update= call's directive is used; the bare-clone directive is flagged unused."""
+    lines, unused = replace_unused
+    _assert_polarity(entity, lines, unused)
+
+
+def test_replace_no_unexpected(replace_unused: DirectiveScan) -> None:
+    """Only the unused_ entity's directive line is flagged."""
+    lines, unused = replace_unused
+    _assert_no_strays(EXPECTED_REPLACE, lines, unused)
 
 
 @pytest.mark.parametrize('entity', EXPECTED_STRICT_TYPING_TYPE, ids=list(EXPECTED_STRICT_TYPING_TYPE))

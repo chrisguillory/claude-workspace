@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TypedDict, cast
 from uuid import UUID
 
@@ -26,9 +26,13 @@ from qdrant_client.http.models import (
     Filter,
     Fusion,
     FusionQuery,
+    IntegerIndexParams,
+    IntegerIndexType,
     MatchAny,
+    MatchValue,
     Modifier,
     OptimizersConfigDiff,
+    PayloadFieldSchema,
     PayloadSchemaType,
     PointStruct,
     Prefetch,
@@ -131,7 +135,9 @@ class QdrantClient:
         Creates a collection with:
         - Dense vectors: Semantic embeddings (e.g., 768 dimensions)
         - Sparse vectors: BM25 keyword embeddings (bm25-rs)
-        - Keyword index on file_type for faceting
+        - Payload indexes: file_type (faceting) and chunk_index (neighbor-context
+          lookups — turns the per-document -C/-B/-A scroll from a full scan into a
+          point lookup; on_disk to keep it out of RAM)
 
         Args:
             collection_name: Collection name.
@@ -156,8 +162,16 @@ class QdrantClient:
                 },
             )
 
-        # Ensure keyword index on file_type for faceting (idempotent)
-        await self._ensure_file_type_index(collection_name)
+        # Ensure payload indexes exist (idempotent): file_type for faceting,
+        # chunk_index (on_disk) for neighbor-context lookups. on_disk's RAM saving is
+        # eventually consistent — it materializes once the optimizer migrates points
+        # into immutable mmap segments (which the indexing pipeline triggers by
+        # restoring the threshold post-reindex); the active mutable segment stays in
+        # RAM briefly.
+        await self._ensure_payload_index(collection_name, 'file_type', PayloadSchemaType.KEYWORD)
+        await self._ensure_payload_index(
+            collection_name, 'chunk_index', IntegerIndexParams(type=IntegerIndexType.INTEGER, on_disk=True)
+        )
 
     async def get_indexing_threshold(self, collection_name: str) -> int:
         """Get current indexing threshold.
@@ -379,6 +393,61 @@ class QdrantClient:
             if point.payload is not None
         ]
 
+    async def get_by_chunk_indices(
+        self,
+        collection_name: str,
+        targets: Mapping[str, Collection[int]],
+        *,
+        timeout: int | None = None,
+    ) -> Sequence[SearchResultDict]:
+        """Retrieve chunks by exact ``(source_path, chunk_index)``.
+
+        Fetches the union of ``{source_path: chunk_indices}`` in one scroll, one
+        OR-of-ANDs clause per ``source_path``. Returns ``score=0.0`` — these are exact
+        lookups, not similarity matches.
+
+        Indices with no stored chunk (e.g. past a document's last chunk) match nothing
+        and are silently absent — the caller treats missing neighbors as a soft boundary.
+        """
+        clauses = [
+            Filter(
+                must=[
+                    FieldCondition(key='source_path', match=MatchValue(value=source_path)),
+                    FieldCondition(key='chunk_index', match=MatchAny(any=list(chunk_indices))),
+                ]
+            )
+            for source_path, chunk_indices in targets.items()
+        ]
+        if not clauses:
+            return []
+
+        points, _ = await self._client.scroll(
+            collection_name=collection_name,
+            scroll_filter=Filter(should=clauses),
+            limit=sum(len(indices) for indices in targets.values()),
+            with_payload=True,
+            with_vectors=False,
+            timeout=timeout,
+        )
+
+        return [
+            SearchResultDict(
+                id=str(point.id),
+                score=0.0,
+                source_path=point.payload['source_path'],
+                chunk_index=point.payload['chunk_index'],
+                file_type=point.payload['file_type'],
+                text=point.payload['text'],
+                start_char=point.payload['start_char'],
+                end_char=point.payload['end_char'],
+                heading_context=point.payload.get('heading_context'),
+                page_number=point.payload.get('page_number'),
+                json_path=point.payload.get('json_path'),
+            )
+            for point in points
+            if point.payload is not None
+        ]
+
     async def delete(self, collection_name: str, point_ids: Sequence[UUID]) -> int:
         """Delete points by ID.
 
@@ -458,25 +527,26 @@ class QdrantClient:
         )
         return {str(hit.value): hit.count for hit in result.hits}
 
-    async def _ensure_file_type_index(self, collection_name: str) -> None:
-        """Create keyword index on file_type for faceting if not exists.
+    async def _ensure_payload_index(
+        self, collection_name: str, field_name: str, field_schema: PayloadFieldSchema
+    ) -> None:
+        """Create a payload index on ``field_name`` if it doesn't already exist.
 
-        This is idempotent - checks if index exists before creating.
+        Idempotent - checks the collection's payload schema before creating.
         Index creation happens asynchronously in the background.
         """
         if not await self.collection_exists(collection_name):
             return
 
-        # Check if file_type index already exists in payload schema
         info = await self._client.get_collection(collection_name)
         payload_schema = getattr(info, 'payload_schema', {}) or {}
-        if 'file_type' in payload_schema:
-            logger.debug('file_type index already exists')
+        if field_name in payload_schema:
+            logger.debug('%s index already exists', field_name)
             return
 
         await self._client.create_payload_index(
             collection_name=collection_name,
-            field_name='file_type',
-            field_schema=PayloadSchemaType.KEYWORD,
+            field_name=field_name,
+            field_schema=field_schema,
         )
-        logger.debug('Created file_type keyword index')
+        logger.debug('Created %s index (%s)', field_name, field_schema)

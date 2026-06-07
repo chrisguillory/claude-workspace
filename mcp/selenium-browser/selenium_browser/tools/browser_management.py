@@ -10,6 +10,7 @@ from mcp.types import ToolAnnotations
 from ..models import (
     DownloadResourceResult,
     JavaScriptResult,
+    ScreenshotMode,
     WindowSize,
 )
 from ..service import BrowserService
@@ -156,7 +157,7 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
         return await service.execute_javascript(code=code, timeout_ms=timeout_ms)
 
     @mcp.tool(annotations=ToolAnnotations(title='Take Screenshot', readOnlyHint=True))
-    async def screenshot(filename: str, full_page: bool = False) -> str:
+    async def screenshot(filename: str, mode: ScreenshotMode = 'viewport') -> str:
         """Capture visual screenshot for verification and debugging.
 
         Use cases:
@@ -167,11 +168,12 @@ def register_tools(service: BrowserService, mcp: FastMCP) -> None:
 
         Args:
             filename: Output filename (e.g., "checkout-page.png")
-            full_page: True for entire scrollable page, False for viewport only
+            mode: 'viewport' (visible area only), or one of two full-page modes that scroll and stitch
+                viewport tiles to capture the whole scrollable page: 'full_page' warms up lazy
+                cross-origin content (GitHub Mermaid/math) first, 'full_page_fast' skips that warm-up
+                (faster, but below-the-fold lazy content may be blank).
 
         Returns:
             Absolute path to saved screenshot (use Read tool to view)
-
-        Note: Requires vision processing. full_page=True uses CDP Page.captureScreenshot.
         """
-        return await service.screenshot(filename=filename, full_page=full_page)
+        return await service.screenshot(filename=filename, mode=mode)

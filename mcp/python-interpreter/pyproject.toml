@@ -1,6 +1,6 @@
 [project]
 name = "python-interpreter"
-version = "0.4.1"
+version = "0.5.0"
 description = "Python Interpreter MCP Server - Persistent Python execution environment"
 requires-python = ">=3.13,<3.14"
 dependencies = [

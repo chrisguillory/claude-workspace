@@ -119,6 +119,7 @@ DIRECTIVE_PREFIX = '# suppression_rationale_linter.py:'
 DEFAULT_CUSTOM_PREFIXES: Sequence[str] = (
     '# exception_safety_linter.py:',
     '# reexport_linter.py:',
+    '# replace_linter.py:',
     '# strict_typing_linter.py:',
 )
 

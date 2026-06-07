@@ -221,19 +221,11 @@ Claude Code ──[stdio/JSON-RPC]──> python-interpreter-mcp
                                             │ HTTP POST /execute
                                             │
 Bash heredoc ──[stdin]──> python-interpreter ───┘
-                          (auto-discovers socket via process tree)
+                          (looks up socket via cc_lib.mcp registry)
 ```
 
-### Session Discovery
+### Registry-based discovery
 
-The server discovers its Claude Code session by:
-1. Walking the process tree upward to find the Claude Code parent process
-2. Using `lsof` to determine Claude's working directory and verify `.claude/` files
-3. Looking up the active session matching Claude's PID in `sessions.json` (maintained by claude-workspace hooks)
-
-### Unix Socket
-
-The HTTP bridge listens on a session-scoped Unix socket:
-- **Path**: `/tmp/python-interpreter-{claude_pid}.sock`
-- **Purpose**: Allows Bash heredoc scripts to execute Python code without spawning new interpreters
-- **Discovery**: `python-interpreter` walks the process tree to find the socket path
+The MCP server, its HTTP bridge socket, and the CLI's discovery of that socket all use
+the workspace-shared `cc_lib.mcp` infrastructure. See `cc-lib/cc_lib/mcp/__init__.py` for
+the registry layout, socket-naming scheme, and bridge lifecycle.
