@@ -16,7 +16,6 @@ import contextlib
 import logging
 import os
 import subprocess
-import sys
 import tempfile
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -24,10 +23,13 @@ from pathlib import Path
 from typing import Literal
 
 from cc_lib.claude_context import ClaudeContext
+from cc_lib.logging_setup import configure_logging
+from cc_lib.mcp import register_self
 from cc_lib.types import CCVersion
 from cc_lib.utils import encode_project_path, get_claude_config_home_dir
 from mcp.server.fastmcp import FastMCP
 
+from claude_session import PROJECT
 from claude_session.exceptions import RunningSessionDeletionError, RunningSessionMoveError
 from claude_session.schemas.operations.archive import ArchiveMetadata
 from claude_session.schemas.operations.context import SessionContext
@@ -108,6 +110,8 @@ async def lifespan(mcp_server: FastMCP) -> AsyncIterator[None]:
 
     Creates ServerState with all services at startup and cleans up on shutdown.
     """
+    configure_logging()
+
     claude_context = ClaudeContext.from_pid_walk()
 
     temp_dir = tempfile.TemporaryDirectory(prefix='claude-session-')
@@ -137,27 +141,21 @@ async def lifespan(mcp_server: FastMCP) -> AsyncIterator[None]:
         # Register tools with closure over state
         register_tools(state)
 
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-            stream=sys.stderr,
-        )
+        async with register_self(mcp_server, claude_context=claude_context, sock_path=None, capabilities=()):
+            logger.info('Session ID: %s', claude_context.session_id)
+            logger.info('Project: %s', claude_context.project_dir)
+            logger.info('Temp dir: %s', temp_path)
 
-        logger.info('Session ID: %s', claude_context.session_id)
-        logger.info('Project: %s', claude_context.project_dir)
-        logger.info('Temp dir: %s', temp_path)
-
-        yield  # Setup successful; application active
+            yield  # Setup successful; application active
 
     finally:
-        # Cleanup temp directory
         temp_dir.cleanup()
         logger.info('Cleaned up temp directory')
 
 
 # -- Server Setup --------------------------------------------------------------
 
-server = FastMCP('claude-session', lifespan=lifespan)
+server = FastMCP(PROJECT.name, lifespan=lifespan)
 
 
 # -- Tool Registration (Closure Pattern) ---------------------------------------
@@ -662,11 +660,15 @@ def register_tools(state: ServerState) -> None:
             # Get info for another session
             info = await get_session_info('019b5232')
         """
-        # Build current session context for enrichment
+        # Build current session context for enrichment.
+        # mcp_pid is this MCP server's own PID — always a child of state.claude_pid,
+        # captured fresh on each call so sibling MCP servers (spawned by agent
+        # frontmatter mcpServers) can be distinguished from the parent's MCP.
         current_context = CurrentSessionContext(
             session_id=state.session_id,
             project_path=state.project_path,
             claude_pid=state.claude_pid,
+            mcp_pid=os.getpid(),
             temp_dir=state.temp_dir.name,
         )
 
