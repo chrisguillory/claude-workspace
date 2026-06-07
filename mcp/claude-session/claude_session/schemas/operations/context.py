@@ -31,7 +31,7 @@ class SessionContext(StrictModel):
     Combines data from multiple sources:
     - Session discovery (session files in ~/.claude/projects/)
     - Claude-workspace tracking (~/.claude-workspace/sessions.json)
-    - MCP server state (for current session: claude_pid, temp_dir)
+    - MCP server state (for current session: mcp_pid, claude_pid, temp_dir)
     - Lineage tracking (~/.claude-workspace/claude-session/lineage.json)
 
     Field ordering:

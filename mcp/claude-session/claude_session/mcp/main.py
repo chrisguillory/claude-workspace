@@ -110,6 +110,8 @@ async def lifespan(mcp_server: FastMCP) -> AsyncIterator[None]:
 
     Creates ServerState with all services at startup and cleans up on shutdown.
     """
+    configure_logging()
+
     claude_context = ClaudeContext.from_pid_walk()
 
     temp_dir = tempfile.TemporaryDirectory(prefix='claude-session-')
@@ -139,9 +141,7 @@ async def lifespan(mcp_server: FastMCP) -> AsyncIterator[None]:
         # Register tools with closure over state
         register_tools(state)
 
-        configure_logging()
-
-        async with register_self(mcp_server, claude_context=claude_context):
+        async with register_self(mcp_server, claude_context=claude_context, sock_path=None, capabilities=()):
             logger.info('Session ID: %s', claude_context.session_id)
             logger.info('Project: %s', claude_context.project_dir)
             logger.info('Temp dir: %s', temp_path)

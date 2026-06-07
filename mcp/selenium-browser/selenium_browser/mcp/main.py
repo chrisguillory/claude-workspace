@@ -23,7 +23,7 @@ import typing
 # Third-Party Libraries
 from cc_lib.claude_context import ClaudeContext
 from cc_lib.logging_setup import configure_logging
-from cc_lib.mcp import get_socket_path, register_self, start_uds_bridge
+from cc_lib.mcp import register_self, start_uds_bridge
 from mcp.server.fastmcp import FastMCP
 
 # Local
@@ -65,16 +65,15 @@ async def lifespan(server_instance: FastMCP) -> typing.AsyncIterator[None]:
             bridge_app = create_bridge_app(service, state.cli_lock)
             bridge = await start_uds_bridge(bridge_app, PROJECT.name)
             stack.push_async_callback(bridge.stop)
-            socket_path = get_socket_path(PROJECT.name)
             await stack.enter_async_context(
                 register_self(
                     server_instance,
                     claude_context=claude_context,
-                    sock_path=str(socket_path),
+                    sock_path=str(bridge.socket_path),
                     capabilities=['bridge'],
                 )
             )
-            logger.info('HTTP bridge: %s', socket_path)
+            logger.info('HTTP bridge: %s', bridge.socket_path)
             logger.info(
                 'Browser service initialized (screenshots: %s, captures: %s)',
                 state.screenshot_dir,

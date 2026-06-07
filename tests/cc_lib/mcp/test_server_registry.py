@@ -19,9 +19,15 @@ class TestRegistry:
         assert list(read_all('no-such-session')) == []
 
     async def test_round_trip_preserves_info(self, info: McpServerInfo) -> None:
-        """JSON serialize -> deserialize -> equality. Schema-change regression bait."""
+        """Write -> read back -> identical wire form. Schema-change regression bait.
+
+        Asserts wire fidelity (same JSON), not Python-object equality — container
+        types may differ across the boundary (e.g. tuple in, list out); production
+        readers only access fields.
+        """
         async with register(info):
-            assert list(read_all(info.session_id)) == [info]
+            (entry,) = read_all(info.session_id)
+            assert entry.model_dump_json() == info.model_dump_json()
 
     async def test_skips_dead_pid(self, info: McpServerInfo, monkeypatch: pytest.MonkeyPatch) -> None:
         """The dispositive read_all behavior — without this, stale entries leak."""
@@ -57,6 +63,8 @@ def info() -> McpServerInfo:
         session_id='test-session-abc',
         claude_version=CCVersion('2.1.138'),
         created_at=os_process.create_time(os.getpid()),
+        sock_path=None,
+        capabilities=['bridge'],
     )
 
 

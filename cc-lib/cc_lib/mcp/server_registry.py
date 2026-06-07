@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 __all__ = [
+    'McpCapability',
     'McpServerInfo',
     'find_live_sock_path',
     'find_one',
@@ -13,6 +14,7 @@ import os
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
 
@@ -24,6 +26,8 @@ from cc_lib.types import CCVersion, JsonDatetime
 from cc_lib.utils import get_claude_workspace_config_home_dir
 from cc_lib.utils.atomic_write import atomic_write
 
+type McpCapability = Literal['bridge']
+
 
 class McpServerInfo(ClosedModel):
     """Runtime identity of one MCP server process.
@@ -31,8 +35,6 @@ class McpServerInfo(ClosedModel):
     Written to ``~/.claude-workspace/mcp/registry/<session_id>/<name>-<mcp_pid>.json``
     on startup, removed on shutdown.
     """
-
-    __strict_typing_linter__hashable_fields__ = True
 
     name: str
     """Registered MCP name, e.g. ``'selenium-browser'``."""
@@ -53,11 +55,11 @@ class McpServerInfo(ClosedModel):
     """The MCP process's create_time, paired with ``mcp_pid`` as a recycle-safe liveness
     anchor (``os_process.ProcessHandle``): a reused PID with a drifted create_time reads as dead."""
 
-    sock_path: str | None = None
-    """UDS socket path, set when the server runs a bridge."""
+    sock_path: str | None
+    """UDS socket path when the server runs a bridge; ``None`` for a bridge-less server."""
 
-    capabilities: tuple[str, ...] = ()
-    """Capability tags, e.g. ``('bridge',)``."""
+    capabilities: Sequence[McpCapability]
+    """Capability tags. No consumer yet — remove if none materializes."""
 
 
 @asynccontextmanager
@@ -76,8 +78,8 @@ async def register_self(
     server: FastMCP,
     *,
     claude_context: ClaudeContext,
-    sock_path: str | None = None,
-    capabilities: Sequence[str] = (),
+    sock_path: str | None,
+    capabilities: Sequence[McpCapability],
 ) -> AsyncIterator[McpServerInfo]:
     """Register this MCP server under ``server.name`` for the body's duration.
 
@@ -93,7 +95,7 @@ async def register_self(
         session_id=claude_context.session_id,
         claude_version=claude_context.claude_version,
         sock_path=sock_path,
-        capabilities=tuple(capabilities),
+        capabilities=capabilities,
     )
     async with register(info):
         yield info

@@ -22,6 +22,11 @@ class UdsBridge:
         self._task = task
         self._socket_path = socket_path
 
+    @property
+    def socket_path(self) -> Path:
+        """The bound UDS socket path — read back instead of recomputing it."""
+        return self._socket_path
+
     async def stop(self) -> None:
         """Signal the uvicorn server to exit, await the serving task, unlink the socket."""
         self._server.should_exit = True

@@ -28,7 +28,7 @@ import fastapi
 import mcp.server.fastmcp
 import mcp.types
 from cc_lib.logging_setup import configure_logging
-from cc_lib.mcp import get_socket_path, register_self, start_uds_bridge
+from cc_lib.mcp import register_self, start_uds_bridge
 
 from python_interpreter import PROJECT
 from python_interpreter.models import ExecuteRequest, InterpreterInfo
@@ -212,18 +212,17 @@ async def lifespan(
         async with contextlib.AsyncExitStack() as stack:
             bridge = await start_uds_bridge(fastapi_app, PROJECT.name)
             stack.push_async_callback(bridge.stop)
-            socket_path = get_socket_path(PROJECT.name)
             await stack.enter_async_context(
                 register_self(
                     server_instance,
                     claude_context=state.claude_context,
-                    sock_path=str(socket_path),
+                    sock_path=str(bridge.socket_path),
                     capabilities=['bridge'],
                 )
             )
             print('Server initialized', file=sys.stderr)
             print(f'  Output directory: {state.output_dir}', file=sys.stderr)
-            print(f'  Unix socket: {socket_path}', file=sys.stderr)
+            print(f'  Unix socket: {bridge.socket_path}', file=sys.stderr)
             yield
 
     finally:
