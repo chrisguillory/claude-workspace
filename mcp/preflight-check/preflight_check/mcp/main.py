@@ -7,18 +7,33 @@ __all__ = [
     'server',
 ]
 
+import contextlib
 import logging
-import sys
+from collections.abc import AsyncIterator
 
+from cc_lib.claude_context import ClaudeContext
+from cc_lib.logging_setup import configure_logging
+from cc_lib.mcp import register_self
 from mcp.server.fastmcp import FastMCP
 
+from preflight_check import PROJECT
 from preflight_check.checks import ALL_CHECKS
 from preflight_check.report import Report
 from preflight_check.runner import run_checks
 
 logger = logging.getLogger(__name__)
 
-server = FastMCP('preflight-check')
+
+@contextlib.asynccontextmanager
+async def lifespan(mcp_server: FastMCP) -> AsyncIterator[None]:
+    configure_logging()
+    claude_context = ClaudeContext.from_pid_walk()
+    async with register_self(mcp_server, claude_context=claude_context, sock_path=None, capabilities=()):
+        logger.info('preflight-check MCP ready (session %s)', claude_context.session_id)
+        yield
+
+
+server = FastMCP(PROJECT.name, lifespan=lifespan)
 
 
 @server.tool()
@@ -32,11 +47,6 @@ def check() -> Report:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-        stream=sys.stderr,
-    )
     server.run()
 
 
