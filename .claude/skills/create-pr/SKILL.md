@@ -14,9 +14,18 @@ allowed-tools:
 
 ## Gathered context
 
-!`.claude/skills/create-pr/gather-pr-context.py $ARGUMENTS`
+!`.claude/skills/create-pr/gather-pr-context.py "$ARGUMENTS"`
 
 ## Instructions
+
+> [!IMPORTANT]
+> **Run every phase — do not skip one because you think you can shortcut it.** Two skips are
+> specifically forbidden:
+> - **Phase 1 enrichment is mandatory even if you lived this session.** Your memory rounds off the
+>   user's exact corrections; the transcript doesn't. Search it.
+> - **Never drop a step over a judgment call** ("the plan has PII," "this arg looks fine"). Handle the
+>   concern *inside* the step — Phase 1: search anyway; Plan: have the user scrub. Skipping is the
+>   user's decision, not yours.
 
 ### Phase 1: Context enrichment
 
@@ -81,6 +90,12 @@ get four headings):
 ```bash
 .claude/skills/create-pr/publish-plan.py <plan>
 ```
+
+> [!NOTE]
+> **The model cannot run this** — uploading the plan to an anyone-with-link gist trips the
+> data-exfiltration classifier (in-chat authorization can't clear it). Have the **user run it via the
+> `!` prefix** (their shell, outside the sandbox) and paste the viewer URL, or add a Bash permission
+> rule. Don't dead-end retrying it as the model.
 
 It creates the secret gist on first run and **reuses it on re-runs** (a local slug→gist-id store — no duplicate gists), then prints the gisthost viewer URL. Link it **just above the session-provenance trailer**, using that URL as the `href`:
 
