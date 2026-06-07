@@ -37,19 +37,19 @@ Usage Examples:
 
 from __future__ import annotations
 
-__all__ = [
-    'main',
-]
-
 import argparse
 import sys
 
 import httpx
+from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.mcp import find_live_sock_path
 
 from python_interpreter import PROJECT
 
+boundary = ErrorBoundary(exit_code=1)
 
+
+@boundary
 def main() -> None:
     parser = argparse.ArgumentParser(description='Execute Python code via MCP interpreter')
     parser.add_argument('--interpreter', '-i', default='builtin', help='Interpreter name (default: builtin)')

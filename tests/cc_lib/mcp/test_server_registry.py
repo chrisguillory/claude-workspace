@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from cc_lib import os_process
-from cc_lib.mcp.server_registry import McpServerInfo, read_all, register
+from cc_lib.mcp.server_registry import McpServerInfo, find_one, read_all, register
 from cc_lib.types import CCVersion
 
 
@@ -52,6 +52,33 @@ class TestRegistry:
         async with register(info):
             assert path.is_file()
         assert not path.exists()
+
+    async def test_find_one_tolerates_concurrent_deregister(
+        self, info: McpServerInfo, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A sibling unlinked between glob and read is skipped, not fatal.
+
+        The registry is lock-free: ``register``'s ``finally`` unlinks an entry
+        while a concurrent ``find_one`` is mid-scan. Hard to stage live (a
+        microsecond glob->read window), so it earns a regression test. Without
+        the FileNotFoundError skip, find_one crashes on the vanished lower-pid
+        sibling before reaching the live target.
+        """
+        # Lower-pid sibling sorts first and vanishes mid-scan; current-pid entry is the live target.
+        vanishing = info.__replace__(mcp_pid=1, sock_path='/tmp/dead.sock')
+        vanishing_file = f'{vanishing.name}-{vanishing.mcp_pid}.json'
+        real_read = Path.read_bytes
+
+        def racing_read(self: Path) -> bytes:
+            if self.name == vanishing_file:
+                self.unlink()  # sibling deregisters in the glob->read window
+            return real_read(self)
+
+        async with register(vanishing), register(info):
+            monkeypatch.setattr(Path, 'read_bytes', racing_read)
+            found = find_one(info.session_id, info.name)
+        assert found is not None
+        assert found.mcp_pid == info.mcp_pid
 
 
 @pytest.fixture

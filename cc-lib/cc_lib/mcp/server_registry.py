@@ -112,7 +112,11 @@ def find_one(session_id: str, name: str) -> McpServerInfo | None:
     if not registry_dir.is_dir():
         return None
     for entry_path in sorted(registry_dir.glob(f'{name}-*.json'), key=_pid_from_entry_path):
-        info = McpServerInfo.model_validate_json(entry_path.read_bytes())
+        try:
+            raw = entry_path.read_bytes()
+        except FileNotFoundError:
+            continue  # sibling deregistered between glob and read — expected in a lock-free registry
+        info = McpServerInfo.model_validate_json(raw)
         if ProcessHandle(info.mcp_pid, info.created_at).is_alive():
             return info
     return None
@@ -144,7 +148,11 @@ def read_all(session_id: str) -> Sequence[McpServerInfo]:
         return []
     live: list[McpServerInfo] = []
     for entry in sorted(registry_dir.glob('*.json')):
-        info = McpServerInfo.model_validate_json(entry.read_bytes())
+        try:
+            raw = entry.read_bytes()
+        except FileNotFoundError:
+            continue  # sibling deregistered between glob and read — expected in a lock-free registry
+        info = McpServerInfo.model_validate_json(raw)
         if ProcessHandle(info.mcp_pid, info.created_at).is_alive():
             live.append(info)
     return live
