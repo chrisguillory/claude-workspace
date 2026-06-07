@@ -3,7 +3,6 @@
 CCLibError                                # base for all cc_lib exceptions
 ├── ClaudeContextError                    # session-context failures
 │   ├── ClaudeProcessNotFoundError        # no Claude ancestor in process tree
-│   │                                     # OR metadata lacks process_created_at anchor
 │   ├── SessionNotFoundError              # session not in sessions.json
 │   ├── InactiveSessionError              # session in sessions.json but state != 'active'
 │   ├── MultipleActiveSessionsForPidError # multiple sessions claim the same claude_pid
@@ -43,8 +42,7 @@ class ClaudeProcessNotFoundError(ClaudeContextError):
     """Could not materialize a ClaudeProcess.
 
     Raised by ``find_claude_process`` when the codesign-verified parent walk
-    finds no Claude binary, and by ``ClaudeProcess.from_session_metadata`` when
-    persisted metadata lacks the ``process_created_at`` anchor.
+    finds no Claude binary.
     """
 
 

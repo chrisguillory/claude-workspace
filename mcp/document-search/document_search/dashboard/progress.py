@@ -165,9 +165,7 @@ class ProgressWriter:
 
         # Apply stalled status if detected
         if self._stalled_since is not None:
-            progress = progress.model_copy(
-                update={'status': 'stalled', 'stalled_since': self._stalled_since},
-            )
+            progress = progress.__replace__(status='stalled', stalled_since=self._stalled_since)
 
         self._state = OperationState(
             operation_id=self._state.operation_id,
@@ -227,7 +225,7 @@ class ProgressWriter:
         # Preserve last known progress, update status to failed
         final_progress: OperationProgress | None = None
         if self._state.progress is not None:
-            final_progress = self._state.progress.model_copy(update={'status': 'failed'})
+            final_progress = self._state.progress.__replace__(status='failed')
 
         self._finalize(progress=final_progress, result=None, error=error)
 

@@ -199,8 +199,7 @@ class SessionInfoService:
         1. Session state is 'active'
         2. The recorded (pid, process_created_at) anchor is still live via
            ProcessHandle.is_alive() — recycle-safe (a reused PID whose create_time
-           drifted reads as dead). Legacy entries without an anchor fall back to a
-           bare alive-check.
+           drifted reads as dead).
 
         Args:
             session_id: Full session ID to check.
@@ -217,15 +216,7 @@ class SessionInfoService:
             return False, None  # Already exited/completed/crashed
 
         pid = workspace_session.metadata.claude_pid
-        expected_created_at = workspace_session.metadata.process_created_at
-
-        if expected_created_at is None:
-            # Legacy session without anchor — fall back to alive-check only.
-            if os_process.is_alive(pid):
-                return (True, pid)
-            return False, None
-
-        if ProcessHandle(pid, expected_created_at).is_alive():
+        if ProcessHandle(pid, workspace_session.metadata.process_created_at).is_alive():
             return True, pid
         return False, None
 

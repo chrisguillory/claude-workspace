@@ -69,7 +69,7 @@ class RerankerService:
             reverse=True,
         )
 
-        reranked_hits: list[SearchHit] = [hit.model_copy(update={'score': score}) for score, hit in scored_hits]
+        reranked_hits: list[SearchHit] = [hit.__replace__(score=score) for score, hit in scored_hits]
 
         if top_k is not None:
             reranked_hits = reranked_hits[:top_k]
