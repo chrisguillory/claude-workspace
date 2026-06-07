@@ -15,14 +15,17 @@
 ``deploy-main <target>`` fetches origin and, for each checkout on the target hosts (the main
 working tree's branch + every linked worktree), classifies and merges ``origin/main`` in:
 
-    clean      -> merge it (a fast-forward when the checkout is already on main)
-    conflict   -> abort, leave the checkout exactly as found, report the files
-    dirty      -> skip (git refuses anyway)
-    current    -> skip (already contains origin/main)
+    current            -> already contains origin/main; nothing to do
+    clean              -> merge it (a fast-forward when the checkout is merely behind)
+    conflict           -> commit-level merge conflict; abort, report the colliding files
+    blocked-local      -> uncommitted *tracked* edits overlap the merge; report, leave untouched
+    blocked-untracked  -> *untracked* files collide with incoming files; report, leave untouched
 
-The merge IS the deploy: a new skill or lib fix on main lands where each machine is working.
-Conflicts are never auto-resolved — they're reported for you (or the on-host AI) to triage.
-Classification uses ``git merge-tree --write-tree`` (in-memory, no worktree); the only mutation
+The merge IS the deploy: a new skill or lib fix on main lands where each machine is working. A
+dirty checkout still merges when its edits don't touch the incoming files — deploy-main only steps
+aside when git itself would refuse (the ``blocked-*`` cases), reporting exactly which files. Nothing
+is ever forced; conflicts and blocks are left for you (or the on-host AI) to triage. Classification
+uses ``git merge-tree --write-tree`` (in-memory) plus a working-tree overlap check; the only mutation
 is a clean ``git merge`` (with ``--abort`` as a safety net). Per-host, idempotent — re-run converges.
 
 Target is a claude-remote-bash selector: one host (M2), a comma-list (M2,M3), or a group
@@ -96,7 +99,9 @@ def _run_fleet(target: str, *, dry_run: bool) -> DeployResult:
     )
 
 
-type CheckoutStatus = Literal['merged', 'would-merge', 'conflict', 'skip-dirty', 'current', 'apply-aborted']
+type CheckoutStatus = Literal[
+    'merged', 'would-merge', 'conflict', 'blocked-local', 'blocked-untracked', 'current', 'apply-aborted'
+]
 
 
 def _parse_checkouts(stdout: str) -> Sequence[CheckoutResult]:
@@ -131,7 +136,7 @@ class CheckoutResult(ClosedModel):
     path: str
     branch: str
     status: CheckoutStatus
-    detail: str  # conflicted files (conflict) or the new short SHA (merged); '' otherwise
+    detail: str  # colliding files (conflict, blocked-*) or the new short SHA (merged); '' otherwise
 
 
 class HostResult(ClosedModel):
@@ -154,30 +159,44 @@ class DeployResult(ClosedModel):
 
 
 # Per-host pipeline, sent to each host over crb (a remote shell executor, so this layer is necessarily
-# shell). Proven in the /tmp/dm-* sandbox: enumerate checkouts (main working tree + linked worktrees),
-# classify via merge-tree, merge the clean ones, abort conflicts, skip dirty/current. Emits one
-# tab-delimited ``CHECKOUT<TAB>path<TAB>branch<TAB>status<TAB>detail`` line per checkout. DRY is
-# injected by _run_fleet (1 = classify only, no mutation).
+# shell). Proven in the /tmp/dm-fix.* sandbox: enumerate checkouts (main working tree + linked
+# worktrees), classify, merge the clean ones, abort/report the rest. A *dirty* checkout still merges
+# when its edits don't overlap the incoming files; ``blocked-local`` (uncommitted tracked edits) and
+# ``blocked-untracked`` (colliding untracked files) are the cases git itself would refuse, reported
+# with the offending files. ``overlap`` intersects two newline lists via awk — no ``-v`` (it rejects
+# embedded newlines) and no process substitution (fleet-shell portability). Emits one tab-delimited
+# ``CHECKOUT<TAB>path<TAB>branch<TAB>status<TAB>detail`` line per checkout. DRY=1 = classify only.
 PIPELINE = r"""
 set -u
 cd "$HOME/claude-workspace" 2>/dev/null || { printf 'ERROR\tno-repo\n'; exit 3; }
 git fetch origin --quiet 2>/dev/null || { printf 'ERROR\tfetch-failed\n'; exit 4; }
 REF=origin/main
+overlap() {  # $1=set $2=candidates -> candidates that appear in set (non-empty lines)
+  { printf '%s\n' "$1"; printf ':::DM-SEP:::\n'; printf '%s\n' "$2"; } | awk '
+    $0==":::DM-SEP:::"{s=1;next}
+    !s{if($0!="")a[$0]=1;next}
+    ($0 in a)'
+}
 git worktree list --porcelain | awk '/^worktree /{print $2}' | while IFS= read -r d; do
   br=$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null || echo DETACHED)
-  if [ -n "$(git -C "$d" status --porcelain 2>/dev/null)" ]; then printf 'CHECKOUT\t%s\t%s\tskip-dirty\t\n' "$d" "$br"; continue; fi
-  if git -C "$d" merge-base --is-ancestor "$REF" HEAD 2>/dev/null; then printf 'CHECKOUT\t%s\t%s\tcurrent\t\n' "$d" "$br"; continue; fi
-  if git -C "$d" merge-tree --write-tree HEAD "$REF" >/dev/null 2>&1; then
-    if [ "$DRY" = "1" ]; then printf 'CHECKOUT\t%s\t%s\twould-merge\t\n' "$d" "$br"; continue; fi
-    if git -C "$d" merge --no-edit "$REF" >/dev/null 2>&1; then
-      printf 'CHECKOUT\t%s\t%s\tmerged\t%s\n' "$d" "$br" "$(git -C "$d" rev-parse --short HEAD)"
-    else
-      git -C "$d" merge --abort 2>/dev/null
-      printf 'CHECKOUT\t%s\t%s\tapply-aborted\t\n' "$d" "$br"
-    fi
-  else
+  if git -C "$d" merge-base --is-ancestor "$REF" HEAD 2>/dev/null; then
+    printf 'CHECKOUT\t%s\t%s\tcurrent\t\n' "$d" "$br"; continue
+  fi
+  if ! git -C "$d" merge-tree --write-tree HEAD "$REF" >/dev/null 2>&1; then
     files=$(git -C "$d" merge-tree --write-tree --name-only HEAD "$REF" 2>/dev/null | sed -n '2,/^$/p' | grep -v '^$' | paste -sd, -)
-    printf 'CHECKOUT\t%s\t%s\tconflict\t%s\n' "$d" "$br" "$files"
+    printf 'CHECKOUT\t%s\t%s\tconflict\t%s\n' "$d" "$br" "$files"; continue
+  fi
+  inc=$(git -C "$d" diff --name-only HEAD "$REF" 2>/dev/null)
+  bl=$(overlap "$inc" "$(git -C "$d" diff --name-only HEAD 2>/dev/null)" | paste -sd, -)
+  if [ -n "$bl" ]; then printf 'CHECKOUT\t%s\t%s\tblocked-local\t%s\n' "$d" "$br" "$bl"; continue; fi
+  bu=$(overlap "$inc" "$(git -C "$d" ls-files --others --exclude-standard 2>/dev/null)" | paste -sd, -)
+  if [ -n "$bu" ]; then printf 'CHECKOUT\t%s\t%s\tblocked-untracked\t%s\n' "$d" "$br" "$bu"; continue; fi
+  if [ "$DRY" = "1" ]; then printf 'CHECKOUT\t%s\t%s\twould-merge\t\n' "$d" "$br"; continue; fi
+  if git -C "$d" merge --no-edit "$REF" >/dev/null 2>&1; then
+    printf 'CHECKOUT\t%s\t%s\tmerged\t%s\n' "$d" "$br" "$(git -C "$d" rev-parse --short HEAD)"
+  else
+    git -C "$d" merge --abort 2>/dev/null
+    printf 'CHECKOUT\t%s\t%s\tapply-aborted\t\n' "$d" "$br"
   fi
 done
 """
