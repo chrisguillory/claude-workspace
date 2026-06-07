@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cc_lib import os_process
-from cc_lib.exceptions import ClaudeProcessNotFoundError
 from cc_lib.macho import MachOSignature
 from cc_lib.os_process import ProcessHandle
 from cc_lib.session_tracker import SessionMetadata
@@ -62,14 +61,7 @@ class ClaudeProcess:
 
         Does NOT re-codesign-verify — write-time was the gate when
         SessionStart hook captured the metadata via ``find_claude_process``.
-
-        Raises:
-            ClaudeProcessNotFoundError — metadata lacks the ``process_created_at`` anchor.
         """
-        if metadata.process_created_at is None:
-            raise ClaudeProcessNotFoundError(
-                f'Session metadata for pid {metadata.claude_pid} lacks process_created_at anchor'
-            )
         return cls(ProcessHandle(metadata.claude_pid, metadata.process_created_at))
 
     def __init__(self, handle: ProcessHandle) -> None:

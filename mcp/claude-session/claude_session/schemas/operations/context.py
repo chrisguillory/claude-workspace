@@ -31,7 +31,7 @@ class SessionContext(StrictModel):
     Combines data from multiple sources:
     - Session discovery (session files in ~/.claude/projects/)
     - Claude-workspace tracking (~/.claude-workspace/sessions.json)
-    - MCP server state (for current session: claude_pid, temp_dir)
+    - MCP server state (for current session: mcp_pid, claude_pid, temp_dir)
     - Lineage tracking (~/.claude-workspace/claude-session/lineage.json)
 
     Field ordering:
@@ -62,7 +62,8 @@ class SessionContext(StrictModel):
 
     # Environment (only populated for current session via MCP, None for CLI queries)
     machine_id: str | None  # user@hostname identifier
-    claude_pid: int | None  # Claude Code process ID
+    mcp_pid: int | None  # claude-session MCP server's own PID (child of claude_pid; None for CLI queries)
+    claude_pid: int | None  # Claude Code process ID (parent of mcp_pid)
     claude_version: CCVersion | None  # Claude Code CLI version (e.g., "2.1.12")
     temp_dir: str | None  # MCP server's temp directory
 

@@ -37,18 +37,19 @@ Usage Examples:
 
 from __future__ import annotations
 
-__all__ = [
-    'main',
-]
-
 import argparse
 import sys
-from pathlib import Path
 
 import httpx
-from cc_lib.claude_context import ClaudeContext
+from cc_lib.error_boundary import ErrorBoundary
+from cc_lib.mcp import find_live_sock_path
+
+from python_interpreter import PROJECT
+
+boundary = ErrorBoundary(exit_code=1)
 
 
+@boundary
 def main() -> None:
     parser = argparse.ArgumentParser(description='Execute Python code via MCP interpreter')
     parser.add_argument('--interpreter', '-i', default='builtin', help='Interpreter name (default: builtin)')
@@ -60,7 +61,11 @@ def main() -> None:
         print('Error: No code provided on stdin', file=sys.stderr)
         sys.exit(1)
 
-    socket_path = Path(f'/tmp/python-interpreter-{ClaudeContext.from_env().claude_pid}.sock')
+    socket_path = find_live_sock_path(PROJECT.name)
+    if socket_path is None:
+        print(f'Error: no live {PROJECT.name} MCP for current session', file=sys.stderr)
+        print(f'Is the {PROJECT.name} MCP server running?', file=sys.stderr)
+        sys.exit(1)
 
     # Build request payload
     payload = {'code': code, 'interpreter': args.interpreter}

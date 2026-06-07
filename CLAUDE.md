@@ -613,6 +613,8 @@ Lists of comparable entries are alphabetically sorted unless there's a semantic 
 ├── commands/                   # Custom slash commands
 ├── skills/                     # placeholder; real skills: .claude/skills/ (project), ~/.claude/skills/ (user)
 ├── configs/                    # Configuration templates
+├── context/                    # Machine-local context layer — data gitignored
+│   └── granola/                # Granola meeting archive (data-only) — sync via /sync-granola-context
 └── claude-docs/                # Reference docs for Claude (not auto-loaded)
 ```
 
@@ -887,10 +889,11 @@ When modifying MCP servers:
 1. Create directory under `mcp/your-server/`
 2. Add `mcp/main.py` and `cli/main.py` following the module layout convention
 3. Add `pyproject.toml` with entry points following naming convention (`<name>-mcp`, `<name>`)
-4. Include `cc_lib` in dependencies for shared utilities
-5. Use relative path: `cc_lib = { path = "../../cc-lib/", editable = true }`
-6. Configure logging in `lifespan()`: `logging.basicConfig(stream=sys.stderr, ...)`
-7. Write tool docstrings that guide Claude's behavior
+4. Include `cc_lib` via relative path: `cc_lib = { path = "../../cc-lib/", editable = true }`
+5. Declare identity once: `PROJECT = Project.from_pyproject(__file__)` in `<pkg>/__init__.py`; pass `PROJECT.name` to `FastMCP(...)` (single source of truth — the name comes from `[project] name`)
+6. In `lifespan()`: call `configure_logging()` (reads `CC_LOG`), then register with the per-session registry — `async with register_self(server, claude_context=ClaudeContext.from_pid_walk(), sock_path=..., capabilities=...)`
+7. Bridge MCPs (CLI talks to the server over a socket): `await start_uds_bridge(app, PROJECT.name)`, pass its socket as `register_self(sock_path=...)`; the CLI resolves it via `find_live_sock_path(PROJECT.name)`
+8. Write tool docstrings that guide Claude's behavior
 
 ### Adding Shared Utilities
 
