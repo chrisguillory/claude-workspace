@@ -25,6 +25,7 @@ Usage:
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -42,9 +43,14 @@ from cc_lib import ErrorBoundary
 from cc_lib.schemas.base import SubsetModel
 from document_search.schemas.indexing import IndexingResult
 
-# Force unbuffered output for progress visibility
-sys.stdout.reconfigure(line_buffering=True)  # type: ignore[union-attr]  # typeshed TextIO lacks reconfigure; runtime is TextIOWrapper
-sys.stderr.reconfigure(line_buffering=True)  # type: ignore[union-attr]  # typeshed TextIO lacks reconfigure; runtime is TextIOWrapper
+# Force line-buffered output for progress visibility. typeshed types the live
+# streams as TextIO (they are legally monkeypatchable), so narrow to the
+# concrete io.TextIOWrapper — the only type declaring reconfigure() — per the
+# isinstance guard the typeshed stub itself documents.
+if isinstance(sys.stdout, io.TextIOWrapper):
+    sys.stdout.reconfigure(line_buffering=True)
+if isinstance(sys.stderr, io.TextIOWrapper):
+    sys.stderr.reconfigure(line_buffering=True)
 
 
 # ---------------------------------------------------------------------------
