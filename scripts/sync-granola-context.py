@@ -19,15 +19,13 @@ Granola API, saves to all_meetings.json, compares against completed_ids.txt,
 and downloads missing notes + transcripts. Fully deterministic.
 
 Usage:
-    sync-meetings.py                  # archive at <repo-root>/context/granola (cwd-independent)
-    GRANOLA_ARCHIVE_DIR=/path/to/archive sync-meetings.py  # escape hatch: alternate archive
+    scripts/sync-granola-context.py   # archive at <repo-root>/context/granola (cwd-independent)
 """
 
 from __future__ import annotations
 
 import io
 import json
-import os
 import re
 import subprocess
 import sys
@@ -60,12 +58,7 @@ if isinstance(sys.stderr, io.TextIOWrapper):
 # Anchored to this script's location (scripts/ → parents[1] is the repo root) so
 # resolution is cwd-independent and survives invocation by absolute path from
 # other projects.
-ARCHIVE_DIR = Path(
-    os.environ.get(
-        'GRANOLA_ARCHIVE_DIR',
-        Path(__file__).resolve().parents[1] / 'context' / 'granola',
-    )
-)
+ARCHIVE_DIR = Path(__file__).resolve().parents[1] / 'context' / 'granola'
 MEETINGS_JSON = ARCHIVE_DIR / 'all_meetings.json'
 COMPLETED_IDS = ARCHIVE_DIR / 'completed_ids.txt'
 MEETINGS_DIR = ARCHIVE_DIR / 'meetings'
@@ -78,7 +71,7 @@ GRANOLA_API = 'https://api.granola.ai'
 # lacking Electron identity headers with a 200 "Unsupported client" envelope.
 # granola-mcp implements both correctly — reuse it as the single source of auth
 # truth rather than duplicating (and drifting from) it.
-GRANOLA_MCP_DIR = Path(os.environ.get('GRANOLA_MCP_DIR', Path.home() / 'granola-mcp'))
+GRANOLA_MCP_DIR = Path.home() / 'granola-mcp'
 
 
 # ---------------------------------------------------------------------------
@@ -102,15 +95,6 @@ class Meeting(SubsetModel):
     deleted_at: str | None = None
 
 
-class SyncResult(SubsetModel):
-    """Summary of a sync run."""
-
-    total: int
-    previously_synced: int
-    downloaded: Sequence[tuple[str, str]] = ()
-    skipped_notes: Sequence[tuple[str, str]] = ()
-
-
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
@@ -131,10 +115,7 @@ def get_auth_headers() -> Mapping[str, str]:
             get_auth_headers as _mcp_auth_headers,
         )
     except ImportError as exc:
-        raise RuntimeError(
-            f'Granola auth requires granola-mcp at {GRANOLA_MCP_DIR} '
-            f'(override with GRANOLA_MCP_DIR). Import failed: {exc}'
-        ) from exc
+        raise RuntimeError(f'Granola auth requires granola-mcp at {GRANOLA_MCP_DIR}. Import failed: {exc}') from exc
     return _mcp_auth_headers()
 
 
@@ -238,18 +219,13 @@ def download_note(client: httpx.Client, document_id: str, headers: Mapping[str, 
     """Download AI-generated meeting notes. Returns None if no panels exist."""
     document = _get_document(client, document_id, headers)
 
-    try:
-        panels_resp = client.post(
-            f'{GRANOLA_API}/v1/get-document-panels',
-            json={'document_id': document_id},
-            headers=headers,
-        )
-        panels_resp.raise_for_status()
-        panels_data = panels_resp.json()
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 500:
-            return None
-        raise
+    panels_resp = client.post(
+        f'{GRANOLA_API}/v1/get-document-panels',
+        json={'document_id': document_id},
+        headers=headers,
+    )
+    panels_resp.raise_for_status()
+    panels_data = panels_resp.json()
 
     if not panels_data:
         return None
@@ -280,16 +256,13 @@ def download_transcript(client: httpx.Client, document_id: str, headers: Mapping
     """Download meeting transcript. Returns None if transcript doesn't exist."""
     document = _get_document(client, document_id, headers)
 
-    try:
-        resp = client.post(
-            f'{GRANOLA_API}/v1/get-document-transcript',
-            json={'document_id': document_id},
-            headers=headers,
-        )
-        resp.raise_for_status()
-        segments = resp.json()
-    except httpx.HTTPStatusError:
-        return None
+    resp = client.post(
+        f'{GRANOLA_API}/v1/get-document-transcript',
+        json={'document_id': document_id},
+        headers=headers,
+    )
+    resp.raise_for_status()
+    segments = resp.json()
 
     if not segments:
         return None
@@ -369,19 +342,15 @@ def cleanup_deleted(api_ids: Set[str], completed: Set[str]) -> Sequence[str]:
     return removed
 
 
-def index_meetings(meetings_dir: Path) -> IndexingResult | None:
+def index_meetings(meetings_dir: Path) -> IndexingResult:
     """Index the meetings directory via document-search CLI."""
     print('Indexing meetings for semantic search...', file=sys.stderr)
     result = subprocess.run(
         ['document-search', 'index', str(meetings_dir), '-c', 'document-chunks', '--no-gitignore', '--format', 'json'],
-        capture_output=True,
+        stdout=subprocess.PIPE,
         text=True,
-        check=False,
+        check=True,
     )
-    if result.returncode != 0:
-        print(f'Index failed: {result.stderr.strip()}', file=sys.stderr)
-        return None
-
     index_result = IndexingResult.model_validate(json.loads(result.stdout))
     print(
         f'Indexed: {index_result.files_indexed} files, {index_result.chunks_created} new chunks'
@@ -396,8 +365,8 @@ def format_output(
     previously_synced: int,
     downloaded: Sequence[tuple[str, str]],
     skipped_notes: Sequence[tuple[str, str]],
+    index_result: IndexingResult,
     cleaned_up: int = 0,
-    index_result: IndexingResult | None = None,
 ) -> str:
     """Format sync results as structured text for model consumption."""
     lines = [
@@ -410,11 +379,10 @@ def format_output(
     if cleaned_up:
         lines.append(f'Cleaned up (deleted from Granola): {cleaned_up}')
 
-    if index_result:
-        lines.append(
-            f'Index: {index_result.files_indexed} new, {index_result.files_cached} cached,'
-            f' {index_result.chunks_created} chunks created'
-        )
+    lines.append(
+        f'Index: {index_result.files_indexed} new, {index_result.files_cached} cached,'
+        f' {index_result.chunks_created} chunks created'
+    )
 
     lines.append('')
 
@@ -517,11 +485,6 @@ def _process_list_item(item: Mapping[str, Any], depth: int, ordered: int | None 
 @ErrorBoundary(exit_code=1)
 def main() -> int:
     """Fetch meeting list, diff against local state, download missing."""
-    if not ARCHIVE_DIR.is_dir():
-        print(f'Archive directory not found: {ARCHIVE_DIR}', file=sys.stderr)
-        print('Set GRANOLA_ARCHIVE_DIR or ensure <repo-root>/context/granola exists.', file=sys.stderr)
-        return 1
-
     MEETINGS_DIR.mkdir(exist_ok=True)
     headers = get_auth_headers()
 
@@ -574,7 +537,7 @@ def main() -> int:
         # Always index — incremental, skips cached files
         if not to_process:
             idx = index_meetings(MEETINGS_DIR)
-            print(format_output(len(all_meetings), len(completed), [], [], len(removed), idx))
+            print(format_output(len(all_meetings), len(completed), [], [], idx, len(removed)))
             return 0
 
         # Phase 3: Download missing
@@ -617,7 +580,7 @@ def main() -> int:
         idx = index_meetings(MEETINGS_DIR)
 
         # Phase 5: Report
-        print(format_output(len(all_meetings), len(completed), downloaded, skipped_notes, len(removed), idx))
+        print(format_output(len(all_meetings), len(completed), downloaded, skipped_notes, idx, len(removed)))
 
     return 0
 

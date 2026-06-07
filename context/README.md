@@ -2,7 +2,7 @@
 
 Machine-local context layer. Data is gitignored and never leaves the machine; only the mechanism that maintains it is tracked.
 
-One context per machine, scoped by the account logged into the producing app (e.g., M2 = work Granola account, M5 = personal).
+One context per machine, scoped by the account logged into the producing app.
 
 | Directory  | Contents                                                               |
 |------------|------------------------------------------------------------------------|
