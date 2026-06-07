@@ -86,13 +86,6 @@ class ServerState:
         output_dir = pathlib.Path(temp_dir.name)
         print(f'Temp directory for large outputs: {output_dir}', file=sys.stderr)
 
-        socket_path = pathlib.Path(f'/tmp/python-interpreter-{claude_context.claude_pid}.sock')
-        # Remove stale socket if it exists
-        if socket_path.exists():
-            socket_path.unlink()
-
-        print(f'Unix socket path: {socket_path}', file=sys.stderr)
-
         # Initialize external interpreter manager
         interpreter_manager = ExternalInterpreterManager(claude_context.project_dir)
 
@@ -124,14 +117,11 @@ class ServerState:
                 )
 
         return cls(
-            session_id=claude_context.session_id,
+            claude_context=claude_context,
             started_at=started_at,
-            project_dir=claude_context.project_dir,
-            socket_path=socket_path,
             transcript_path=transcript_path,
             output_dir=output_dir,
             temp_dir=temp_dir,
-            claude_pid=claude_context.claude_pid,
             interpreter_manager=interpreter_manager,
             interpreter_registry=interpreter_registry,
             jetbrains_sdks=jetbrains_sdks,
@@ -140,32 +130,27 @@ class ServerState:
 
     def __init__(
         self,
-        session_id: str,
+        claude_context: ClaudeContext,
         started_at: datetime.datetime,
-        project_dir: pathlib.Path,
-        socket_path: pathlib.Path,
         transcript_path: pathlib.Path,
         output_dir: pathlib.Path,
         temp_dir: tempfile.TemporaryDirectory[str],
-        claude_pid: int,
         interpreter_manager: ExternalInterpreterManager,
         interpreter_registry: InterpreterRegistryManager,
         jetbrains_sdks: Sequence[JetBrainsSDKEntry],
         jetbrains_runs: Sequence[JetBrainsRunConfig],
     ) -> None:
         # Identity
-        self.session_id = session_id
+        self.claude_context = claude_context
         self.started_at = started_at
 
         # Path configuration
-        self.project_dir = project_dir
-        self.socket_path = socket_path
+        self.project_dir = claude_context.project_dir
         self.transcript_path = transcript_path
         self.output_dir = output_dir
 
         # Resources
         self.temp_dir = temp_dir
-        self.claude_pid = claude_pid
         self.interpreter_manager = interpreter_manager
         self.interpreter_registry = interpreter_registry
 

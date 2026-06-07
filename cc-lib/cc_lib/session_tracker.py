@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from collections.abc import Sequence, Set
 from datetime import UTC, datetime
 from pathlib import Path
 
 from filelock import FileLock
 
-from cc_lib import os_process
 from cc_lib.os_process import ProcessHandle
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.types import CCVersion, JsonDatetime, SessionSource, SessionState
 from cc_lib.utils import get_claude_workspace_config_home_dir
+from cc_lib.utils.atomic_write import atomic_write
 
 __all__ = [
     'Session',
@@ -58,7 +57,7 @@ class SessionMetadata(ClosedModel):
     """Derived session information."""
 
     claude_pid: int  # Found via process tree walking
-    process_created_at: JsonDatetime | None = None  # When OS created Claude process (from psutil)
+    process_created_at: JsonDatetime  # When OS created Claude process (from psutil)
     session_ended_at: JsonDatetime | None = None  # When SessionEnd hook fired (clean exit)
     session_end_reason: str | None = None  # Why session ended (prompt_input_exit, clear, logout, other)
     parent_id: str | None = None  # Extracted from transcript file
@@ -114,10 +113,10 @@ class SessionManager:
         transcript_path: str,
         source: SessionSource,
         claude_pid: int,
+        process_created_at: datetime,
         parent_id: str | None,
         startup_model: str | None = None,
         claude_version: CCVersion | None = None,
-        process_created_at: datetime | None = None,
     ) -> None:
         """Start a new session or restart an exited/completed/crashed session.
 
@@ -126,10 +125,10 @@ class SessionManager:
             transcript_path: Path to session JSONL file
             source: Session source (startup, resume, compact, clear)
             claude_pid: Claude process PID
+            process_created_at: When OS created Claude process (from psutil)
             parent_id: Parent conversation UUID if available
             startup_model: Initial AI model (only provided on startup, not resume)
             claude_version: Claude Code CLI version (from executable symlink path)
-            process_created_at: When OS created Claude process (from psutil)
         """
         if self._db is None:
             raise RuntimeError("SessionManager must be used within 'with' context")
@@ -264,13 +263,7 @@ class SessionManager:
             rival_pid = session.metadata.claude_pid
             if rival_pid == claude_pid:
                 continue
-            recorded_create_at = session.metadata.process_created_at
-            if recorded_create_at is None:
-                # Legacy session without anchor — fall back to alive-check only.
-                if os_process.is_alive(rival_pid):
-                    return session
-                continue
-            if ProcessHandle(rival_pid, recorded_create_at).is_alive():
+            if ProcessHandle(rival_pid, session.metadata.process_created_at).is_alive():
                 return session
         return None
 
@@ -291,7 +284,7 @@ class SessionManager:
                 updated_sessions.append(session)
                 continue
 
-            if not os_process.is_alive(session.metadata.claude_pid):
+            if not ProcessHandle(session.metadata.claude_pid, session.metadata.process_created_at).is_alive():
                 # Create new session with crashed state
                 crashed_session = Session(
                     session_id=session.session_id,
@@ -407,20 +400,11 @@ def load_sessions(cwd: str) -> SessionDatabase:
 
 
 def save_sessions(cwd: str, db: SessionDatabase) -> None:
-    """Save sessions to sessions.json file using atomic write.
-
-    Uses temp file + rename for atomic operation to prevent corruption.
+    """Save sessions to sessions.json atomically.
 
     Args:
         cwd: Current working directory path
         db: SessionDatabase to save
     """
     sessions_file = get_sessions_file(cwd)
-
-    # Write to temp file in same directory (required for atomic rename)
-    with tempfile.NamedTemporaryFile(mode='w', dir=sessions_file.parent, delete=False, suffix='.tmp') as f:
-        temp_path = Path(f.name)
-        json.dump(db.model_dump(mode='json', exclude_none=True), f, indent=2)
-
-    # Atomic rename
-    temp_path.replace(sessions_file)
+    atomic_write(sessions_file, json.dumps(db.model_dump(mode='json', exclude_none=True), indent=2).encode())

@@ -7,6 +7,7 @@ disable-model-invocation: false
 effort: max
 allowed-tools:
   - "Bash(.claude/skills/create-pr/gather-pr-context.py:*)"
+  - "Bash(.claude/skills/create-pr/publish-plan.py:*)"
 ---
 
 # Create PR: Context → Draft → Review → Submit
@@ -75,6 +76,22 @@ get four headings):
 - Closing keywords (`Fixes #N`) auto-close **only against the default branch** and fire on
   loose wording — use exactly one per genuinely-closed issue, `Refs #N` for related ones.
 
+**Claude Code Plan (when the session has one)** — the plan is Claude's launch point, not kept live after implementation, so treat it as *auxiliary origin context* parked at the **bottom**, never the headline. **First scan the plan for anything sensitive — secrets (tokens, keys) *and* personal/identifying details (private hostnames, home-network layout, personal paths, PII) — and have the user scrub it** — a gist is URL-reachable, so confirm before it leaves the repo. Then publish the session's plan (a `*plan*.md` written this session, or a path the user names) — the **same** file, never a copy:
+
+```bash
+.claude/skills/create-pr/publish-plan.py <plan>
+```
+
+It creates the secret gist on first run and **reuses it on re-runs** (a local slug→gist-id store — no duplicate gists), then prints the gisthost viewer URL. Link it **just above the session-provenance trailer**, using that URL as the `href`:
+
+```html
+<a href="{viewUrl}">
+  <img src="https://github.com/user-attachments/assets/fcc9f9e9-e066-462d-9894-1f0ac2eda6f2" alt="Claude" width="16"> Claude Code Plan
+</a>
+```
+
+Skip the section entirely if there's no plan.
+
 **Session provenance (always)** — end the body with: `<sub>Claude Code session <code>SESSION_ID</code></sub>` (the gather step prints the session ID; or `claude-session info`). ID only — the machine is recoverable from the ID across the mesh.
 
 Write the file to `scratch/`.
@@ -105,7 +122,7 @@ Use REST — `gh pr edit --body` hits the deprecated Projects Classic API.
 
 ### Phase 6: Post-creation
 
-Report the PR URL. Merges here gate on the `merge-gatekeeper` umbrella check (ruleset-protected, linear history) — offer `gh pr merge --squash --auto` if the user wants it to land on green.
+Report the PR URL. Merges here gate on CI (ruleset-protected, linear history) — offer `gh pr merge --squash --auto` if the user wants it to land on green.
 
 **After the PR is open, never amend or force-push.** Land follow-ons — review responses,
 fixes, adjustments — as **new dedicated commits** (`fix: …`, "address review", "add test")
@@ -125,6 +142,7 @@ you keep reviewability during the PR *and* a tidy history after.
 - **No force-push once open** — land follow-ons as new commits so the change-since-last-look stays visible; squash collapses them at merge.
 - **TLDR-first, depth in `<details>`** — write for a ~20-second skim, never a wall.
 - **Session provenance** — end every body with `<sub>Claude Code session <id></sub>` (ID only).
+- **Claude Code Plan** — when the session has one, scrub it for secrets **and personal/PII details**, then publish via `.claude/skills/create-pr/publish-plan.py <plan>` (the *same* file; idempotent slug→id store, no duplicate gists) and link it at the **bottom**; auxiliary origin context.
 
 ## Anti-patterns
 

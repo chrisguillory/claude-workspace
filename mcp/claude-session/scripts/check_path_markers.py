@@ -2,130 +2,79 @@
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
+#   "claude-session",
 #   "pydantic>=2.0.0",
 # ]
+#
+# [tool.uv.sources]
+# claude-session = { path = "../", editable = true }
 # ///
 
-"""Check that all path fields are marked with # PATH TO TRANSLATE comments."""
+"""Check PathMarker coverage on session models.
+
+Path translation during cross-machine restore is driven by ``PathMarker``
+annotations (``PathField``/``PathListField`` — see ``schemas/session/markers.py``);
+``introspection.get_path_fields`` is the runtime consumer. This script walks every
+model in ``schemas/session/models.py`` and flags suspect-named, string-typed fields
+that carry no marker: each is either a translation gap (mark it) or a judged
+non-path (add it to ``EXEMPT`` with the reason).
+
+Usage:
+    ./scripts/check_path_markers.py    # exit 1 while unadjudicated suspects remain
+"""
 
 from __future__ import annotations
 
+import inspect
 import re
 import sys
-from pathlib import Path
+import typing
+from collections.abc import Mapping
+
+from claude_session.introspection import get_path_fields
+from claude_session.schemas.session import models
+from pydantic import BaseModel
+
+SUSPECT_NAME = re.compile(r'path|cwd|dir(?!ection)|folder|file', re.IGNORECASE)
+
+EXEMPT: Mapping[tuple[str, str], str] = {}
+"""(model, field) → reason a suspect-named string field is judged not a translatable path."""
 
 
-def check_path_markers() -> bool:
-    """Check all path fields have translation markers."""
-    models_file = (Path(__file__).parent.parent / 'src' / 'schemas' / 'session' / 'models.py').resolve(strict=True)
-    content = models_file.read_text()
+def main() -> int:
+    suspects: list[tuple[str, str, str]] = []
+    n_models = 0
+    n_marked = 0
+    for name, cls in inspect.getmembers(models, inspect.isclass):
+        if not (issubclass(cls, BaseModel) and cls.__module__ == models.__name__):
+            continue
+        n_models += 1
+        marked = set(get_path_fields(cls))
+        n_marked += len(marked)
+        for field_name, info in cls.model_fields.items():
+            if field_name in marked or (name, field_name) in EXEMPT:
+                continue
+            if SUSPECT_NAME.search(field_name) and _contains_str(info.annotation):
+                suspects.append((name, field_name, str(info.annotation)))
 
-    # Fields that should have path markers
-    path_fields = [
-        'cwd',
-        'file_path',
-        'filePath',
-        'projectPaths',
-        'oldString',  # Edit tool
-        'newString',  # Edit tool
-    ]
+    print(f'{n_models} models; {n_marked} PathMarker-covered fields; {len(EXEMPT)} exemptions')
+    if not suspects:
+        print('No unadjudicated suspects — coverage clean.')
+        return 0
+    print(f'\n{len(suspects)} suspect fields (each is a translation gap, or belongs in EXEMPT with a reason):')
+    for model_name, field_name, annotation in sorted(suspects):
+        print(f'  {model_name}.{field_name}: {annotation}')
+    return 1
 
-    print('=' * 80)
-    print('Path Translation Marker Check')
-    print('=' * 80)
-    print()
 
-    issues = []
-    marked_correctly = []
-
-    for field in path_fields:
-        # Find all occurrences of this field
-        pattern = rf'^\s*{re.escape(field)}:\s*(.+?)$'
-        matches = list(re.finditer(pattern, content, re.MULTILINE))
-
-        for match in matches:
-            line_text = match.group(0)
-
-            # Check if it has PATH TO TRANSLATE comment
-            if '# PATH TO TRANSLATE' in line_text:
-                marked_correctly.append((field, line_text.strip()))
-            else:
-                # Check if it's in a comment or docstring (skip these)
-                line_num = content[: match.start()].count('\n') + 1
-
-                # Get context
-                lines = content.split('\n')
-                context_start = max(0, line_num - 3)
-                context = '\n'.join(lines[context_start : line_num + 1])
-
-                # Skip if in docstring or comment
-                in_docstring = '"""' in context or "'''" in context
-                in_comment = line_text.strip().startswith('#')
-
-                if not in_docstring and not in_comment:
-                    issues.append((field, line_num, line_text.strip()))
-
-    print('✓ CORRECTLY MARKED PATH FIELDS:')
-    for field, line in marked_correctly:
-        print(f'  {field}: {line}')
-    print()
-
-    if issues:
-        print('⚠ MISSING PATH MARKERS:')
-        for _field, line_num, line in issues:
-            print(f'  Line {line_num}: {line}')
-            print('    → Should have: # PATH TO TRANSLATE comment')
-        print()
-        return False
-    else:
-        print('✓ All path fields correctly marked!')
-        print()
+def _contains_str(annotation: object) -> bool:
+    """Whether the annotation's atoms include ``str`` (through aliases, unions, containers)."""
+    if isinstance(annotation, typing.TypeAliasType):
+        annotation = annotation.__value__
+    if annotation is str:
         return True
-
-
-def find_potential_path_fields() -> None:
-    """Find fields that might contain paths but aren't marked."""
-    models_file = (Path(__file__).parent.parent / 'src' / 'schemas' / 'session' / 'models.py').resolve(strict=True)
-    content = models_file.read_text()
-
-    # Look for str fields that might be paths
-    potential_patterns = [
-        r'^\s*(\w*[Pp]ath\w*):\s*str',
-        r'^\s*(\w*[Dd]ir\w*):\s*str',
-        r'^\s*(\w*[Ff]ile\w*):\s*str',
-        r'^\s*(cwd):\s*str',
-    ]
-
-    print('🔍 POTENTIAL PATH FIELDS (should review):')
-    found_any = False
-
-    for pattern in potential_patterns:
-        matches = re.finditer(pattern, content, re.MULTILINE | re.IGNORECASE)
-        for match in matches:
-            field_name = match.group(1)
-            line = match.group(0).strip()
-            line_num = content[: match.start()].count('\n') + 1
-
-            # Skip if already has marker
-            if '# PATH TO TRANSLATE' not in line:
-                # Get context
-                lines = content.split('\n')
-                context_start = max(0, line_num - 2)
-                context_end = min(len(lines), line_num + 1)
-                context = '\n'.join(f'  {i + 1}: {lines[i]}' for i in range(context_start, context_end))
-
-                print(f'\nLine {line_num}: {field_name}')
-                print(context)
-                found_any = True
-
-    if not found_any:
-        print('  None found - all look good!')
-    print()
+    return any(_contains_str(arg) for arg in typing.get_args(annotation))
 
 
 if __name__ == '__main__':
-    all_marked = check_path_markers()
-    find_potential_path_fields()
-
-    if not all_marked:
-        sys.exit(1)
+    sys.exit(main())
