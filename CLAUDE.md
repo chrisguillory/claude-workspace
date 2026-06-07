@@ -613,6 +613,8 @@ Lists of comparable entries are alphabetically sorted unless there's a semantic 
 ├── commands/                   # Custom slash commands
 ├── skills/                     # placeholder; real skills: .claude/skills/ (project), ~/.claude/skills/ (user)
 ├── configs/                    # Configuration templates
+├── context/                    # Machine-local context layer — data gitignored
+│   └── granola/                # Granola meeting archive (data-only) — sync via /sync-granola-context
 └── claude-docs/                # Reference docs for Claude (not auto-loaded)
 ```
 
