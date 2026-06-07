@@ -11,6 +11,7 @@ members = [
     "document-search",
     "imessage-kit",
     "playwright-browser",
+    "preflight-check",
     "python-interpreter",
     "selenium-browser",
     "stubs",
@@ -1925,6 +1926,25 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/40/f1/6d86a29246dfd2e9b6237f0b5823717f60cad94d47ddc26afa916d21f525/pre_commit-4.5.1.tar.gz", hash = "sha256:eb545fcff725875197837263e977ea257a402056661f09dae08e4b149b030a61", size = 198232, upload-time = "2025-12-16T21:14:33.552Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5d/19/fd3ef348460c80af7bb4669ea7926651d1f95c23ff2df18b9d24bab4f3fa/pre_commit-4.5.1-py2.py3-none-any.whl", hash = "sha256:3b3afd891e97337708c1674210f8eba659b52a38ea5f822ff142d10786221f77", size = 226437, upload-time = "2025-12-16T21:14:32.409Z" },
+]
+
+[[package]]
+name = "preflight-check"
+version = "0.1.0"
+source = { editable = "mcp/preflight-check" }
+dependencies = [
+    { name = "cc-lib" },
+    { name = "fastmcp" },
+    { name = "pydantic" },
+    { name = "typer" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cc-lib", editable = "cc-lib" },
+    { name = "fastmcp", specifier = ">=2.13.0.2" },
+    { name = "pydantic", specifier = ">=2.12.4" },
+    { name = "typer", specifier = ">=0.20.0" },
 ]
 
 [[package]]

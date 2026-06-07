@@ -20,6 +20,7 @@ members = [
     "mcp/document-search",
     "mcp/imessage-kit",
     "mcp/playwright-browser",
+    "mcp/preflight-check",
     "mcp/python-interpreter",
     "mcp/selenium-browser",
     "stubs",

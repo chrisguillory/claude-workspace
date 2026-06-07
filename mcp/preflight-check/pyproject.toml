@@ -1,0 +1,29 @@
+[project]
+name = "preflight-check"
+version = "0.1.0"
+description = "Machine and mesh readiness checks for Claude Code sessions"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "cc-lib",
+    "fastmcp>=2.13.0.2",
+    "pydantic>=2.12.4",
+    "typer>=0.20.0",
+]
+
+[project.scripts]
+preflight-check = "preflight_check.cli.main:main"
+preflight-check-mcp = "preflight_check.mcp.main:main"
+
+[tool.uv.sources]
+cc-lib = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["preflight_check/"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
