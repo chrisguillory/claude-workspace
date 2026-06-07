@@ -21,4 +21,4 @@ meetings, and updating tracking files.
 
 If the script reports errors, note them. Common non-errors:
 - "No note available" — meeting has no AI-generated notes yet (normal)
-- "No transcript" — meeting wasn't recorded (normal)
+- "No transcript available" — meeting wasn't recorded (normal)

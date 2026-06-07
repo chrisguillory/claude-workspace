@@ -485,7 +485,7 @@ def _process_list_item(item: Mapping[str, Any], depth: int, ordered: int | None 
 @ErrorBoundary(exit_code=1)
 def main() -> int:
     """Fetch meeting list, diff against local state, download missing."""
-    MEETINGS_DIR.mkdir(exist_ok=True)
+    MEETINGS_DIR.mkdir(parents=True, exist_ok=True)
     headers = get_auth_headers()
 
     with httpx.Client(timeout=30.0) as client:
@@ -524,7 +524,7 @@ def main() -> int:
         if COMPLETED_IDS.exists():
             completed = {line.strip() for line in COMPLETED_IDS.read_text().splitlines() if line.strip()}
 
-        to_process = [m for m in all_meetings if m['id'] not in completed]
+        to_process = [Meeting.model_validate(m) for m in all_meetings if m['id'] not in completed]
 
         # Phase 2b: Clean up meetings deleted from Granola
         api_ids = {m['id'] for m in all_meetings}
@@ -545,9 +545,9 @@ def main() -> int:
         skipped_notes: list[tuple[str, str]] = []
 
         for i, meeting in enumerate(to_process, 1):
-            mid = meeting['id']
-            title = meeting.get('title') or '(Untitled)'
-            created = meeting.get('created_at', '')
+            mid = meeting.id
+            title = meeting.title or '(Untitled)'
+            created = meeting.created_at or ''
             print(f'[{i}/{len(to_process)}] {title[:60]}', file=sys.stderr)
 
             note = download_note(client, mid, headers)
@@ -562,6 +562,8 @@ def main() -> int:
             if transcript:
                 (MEETINGS_DIR / f'{mid}-transcript.md').write_text(transcript, encoding='utf-8')
                 print(f'  Transcript: {len(transcript)} bytes', file=sys.stderr)
+            else:
+                print('  No transcript available', file=sys.stderr)
 
             private = download_private_notes(client, mid, headers)
             if private:
