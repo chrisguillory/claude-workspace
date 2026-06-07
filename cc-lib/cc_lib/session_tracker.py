@@ -9,7 +9,6 @@ from pathlib import Path
 
 from filelock import FileLock
 
-from cc_lib import os_process
 from cc_lib.os_process import ProcessHandle
 from cc_lib.schemas.base import ClosedModel
 from cc_lib.types import CCVersion, JsonDatetime, SessionSource, SessionState
@@ -58,7 +57,7 @@ class SessionMetadata(ClosedModel):
     """Derived session information."""
 
     claude_pid: int  # Found via process tree walking
-    process_created_at: JsonDatetime | None = None  # When OS created Claude process (from psutil)
+    process_created_at: JsonDatetime  # When OS created Claude process (from psutil)
     session_ended_at: JsonDatetime | None = None  # When SessionEnd hook fired (clean exit)
     session_end_reason: str | None = None  # Why session ended (prompt_input_exit, clear, logout, other)
     parent_id: str | None = None  # Extracted from transcript file
@@ -114,10 +113,10 @@ class SessionManager:
         transcript_path: str,
         source: SessionSource,
         claude_pid: int,
+        process_created_at: datetime,
         parent_id: str | None,
         startup_model: str | None = None,
         claude_version: CCVersion | None = None,
-        process_created_at: datetime | None = None,
     ) -> None:
         """Start a new session or restart an exited/completed/crashed session.
 
@@ -126,10 +125,10 @@ class SessionManager:
             transcript_path: Path to session JSONL file
             source: Session source (startup, resume, compact, clear)
             claude_pid: Claude process PID
+            process_created_at: When OS created Claude process (from psutil)
             parent_id: Parent conversation UUID if available
             startup_model: Initial AI model (only provided on startup, not resume)
             claude_version: Claude Code CLI version (from executable symlink path)
-            process_created_at: When OS created Claude process (from psutil)
         """
         if self._db is None:
             raise RuntimeError("SessionManager must be used within 'with' context")
@@ -264,13 +263,7 @@ class SessionManager:
             rival_pid = session.metadata.claude_pid
             if rival_pid == claude_pid:
                 continue
-            recorded_create_at = session.metadata.process_created_at
-            if recorded_create_at is None:
-                # Legacy session without anchor — fall back to alive-check only.
-                if os_process.is_alive(rival_pid):
-                    return session
-                continue
-            if ProcessHandle(rival_pid, recorded_create_at).is_alive():
+            if ProcessHandle(rival_pid, session.metadata.process_created_at).is_alive():
                 return session
         return None
 
@@ -291,7 +284,7 @@ class SessionManager:
                 updated_sessions.append(session)
                 continue
 
-            if not os_process.is_alive(session.metadata.claude_pid):
+            if not ProcessHandle(session.metadata.claude_pid, session.metadata.process_created_at).is_alive():
                 # Create new session with crashed state
                 crashed_session = Session(
                     session_id=session.session_id,

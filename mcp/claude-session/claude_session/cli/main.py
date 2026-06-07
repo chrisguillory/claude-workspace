@@ -77,14 +77,12 @@ def _configure_logging(
         typer.echo(ctx.get_help())
 
 
-def _format_age(dt: datetime | None) -> str:
+def _format_age(dt: datetime) -> str:
     """Format a datetime as a precise human-readable age.
 
     Uses two-unit precision (e.g., 2h12m, 3d5h) so that descriptions
     are naturally unique — zsh groups completions with identical text.
     """
-    if dt is None:
-        return '?'
     total_minutes = int((datetime.now(UTC) - dt).total_seconds() / 60)
     if total_minutes < 60:
         return f'{max(total_minutes, 1)}m'
@@ -102,7 +100,7 @@ def _complete_session_id(incomplete: str) -> Sequence[tuple[str, str]]:
     matches.sort(
         key=lambda s: (
             s.state != 'active',  # active first
-            -(s.metadata.process_created_at or datetime.min.replace(tzinfo=UTC)).timestamp(),
+            -s.metadata.process_created_at.timestamp(),
         ),
     )
     results: list[tuple[str, str]] = []
