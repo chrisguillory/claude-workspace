@@ -4,7 +4,7 @@ Thin wrapper around google-genai. Handles API calls only - no business logic.
 Type translation happens in the service layer.
 
 Uses native async API (client.aio) for true concurrent requests.
-Rate limiting via pyrate_limiter to respect API quotas.
+Concurrency controlled via semaphore.
 """
 
 from __future__ import annotations
@@ -15,13 +15,11 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Literal
 
 import httpx
-import pyrate_limiter
 import tenacity
 from cc_lib import ConcurrencyTracker
 from cc_lib.utils import get_claude_workspace_config_home_dir
 from google import genai
 from google.genai.types import EmbedContentConfig, HttpOptions
-from vertexai.preview import tokenization
 
 from document_search.clients import _retry
 from document_search.clients.protocols import TransientErrorCategory
@@ -44,17 +42,11 @@ type GeminiTaskType = Literal[
 
 
 class GeminiClient:
-    """Low-level Gemini API client with rate limiting.
+    """Low-level Gemini API client.
 
     Uses native async API (client.aio) for true concurrent HTTP requests.
-    Rate limited via pyrate_limiter, concurrency controlled via semaphore.
+    Concurrency controlled via semaphore.
     """
-
-    # Rate limiting - Tier 1 limits:
-    # - RPM: 3000 requests per minute
-    # - TPM: 1,000,000 tokens per minute (this is usually the bottleneck)
-    DEFAULT_REQUESTS_PER_MINUTE = 3000
-    DEFAULT_TOKENS_PER_MINUTE = 1_000_000
 
     # Concurrency control - semaphore limits concurrent API calls
     DEFAULT_MAX_CONCURRENT = 200  # Tuned for throughput - Gemini handles well
@@ -70,7 +62,6 @@ class GeminiClient:
         model: str,
         output_dimensionality: int,
         *,
-        requests_per_minute: int = DEFAULT_REQUESTS_PER_MINUTE,
         api_key: str | None = None,
         max_concurrent: int = DEFAULT_MAX_CONCURRENT,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
@@ -83,7 +74,6 @@ class GeminiClient:
         Args:
             model: Embedding model name (e.g., 'gemini-embedding-001').
             output_dimensionality: Output vector dimensions (e.g., 768).
-            requests_per_minute: Rate limit (default 3000 for Tier 1).
             api_key: Gemini API key. If None, loads from standard location.
             max_concurrent: Max concurrent API requests (semaphore limit).
             timeout_ms: Request timeout in milliseconds.
@@ -94,22 +84,6 @@ class GeminiClient:
         self._model = model
         self._output_dimensionality = output_dimensionality
         self._api_key = api_key or _load_api_key()
-
-        # RPM limiter: 100 texts per (time to do one batch at rpm)
-        # 3000/min = 30 batches/min = 1 batch per 2 seconds
-        batch_size = 100
-        batches_per_minute = requests_per_minute // batch_size  # 3000/100 = 30
-        seconds_per_batch = 60 // batches_per_minute  # 60/30 = 2 seconds
-        self._rpm_limiter = pyrate_limiter.Limiter(
-            pyrate_limiter.Rate(batch_size, seconds_per_batch * pyrate_limiter.Duration.SECOND),
-        )
-
-        # TPM limiter: 1M tokens/min, 12-second window.
-        # 200K budget fits exactly 4 batches of 50K tokens = 100% utilization. 429s trigger retry.
-        tokens_per_window = self.DEFAULT_TOKENS_PER_MINUTE // 5  # 200K per 12s
-        self._tpm_limiter = pyrate_limiter.Limiter(
-            pyrate_limiter.Rate(tokens_per_window, 12 * pyrate_limiter.Duration.SECOND),
-        )
 
         # HTTP client configuration
         limits = httpx.Limits(
@@ -134,11 +108,6 @@ class GeminiClient:
         'query': 'RETRIEVAL_QUERY',
     }
 
-    # Embedding model → tokenizer model (verified to match API count_tokens)
-    EMBEDDING_TO_TOKENIZER: Mapping[str, str] = {
-        'gemini-embedding-001': 'gemini-1.5-flash-002',
-    }
-
     @_retry.gemini_breaker
     @tenacity.retry(
         retry=tenacity.retry_if_exception(_retry.is_retryable_gemini_error),
@@ -156,8 +125,8 @@ class GeminiClient:
         """Embed texts using Gemini API.
 
         Uses native async API for true concurrent requests.
-        Rate limiting handled internally via semaphore.
-        Retries on transient network errors (ReadError, WriteError, timeouts).
+        Concurrency controlled via semaphore.
+        Retries on transient errors as classified by _retry.gemini.
 
         Args:
             texts: Texts to embed (max 100 per API call).
@@ -172,17 +141,6 @@ class GeminiClient:
             circuitbreaker.CircuitBreakerError: Breaker open from a sustained
                 outage, raised before the request.
         """
-        # Token estimation calibrated to Google AI Studio dashboard (2026-01-30)
-        # IMPORTANT: API count_tokens() returns ~2.6x fewer than dashboard/rate limiter tracks.
-        # This discrepancy is documented: https://discuss.ai.google.dev/t/token-counts-mismatch-9x-discrepancy/72633
-        # Using chars/2.63 matches dashboard TPM; chars/6.79 matches API count_tokens().
-        # We use 2.63 because that's what Google's rate limiter actually enforces.
-        estimated_tokens = int(sum(len(t) for t in texts) / 2.63)
-
-        # Acquire from both limiters (RPM by text count, TPM by token estimate)
-        await self._rpm_limiter.try_acquire_async('rpm', weight=len(texts))
-        await self._tpm_limiter.try_acquire_async('tpm', weight=estimated_tokens)
-
         # Translate intent to Gemini's task_type
         gemini_task_type = self.INTENT_TO_GEMINI_TASK[intent]
 
@@ -196,49 +154,6 @@ class GeminiClient:
                 ),
             )
             return [list(e.values) for e in result.embeddings]
-
-    async def count_tokens(self, texts: Sequence[str]) -> int:
-        """Count tokens for texts using Gemini API.
-
-        Makes an API call to get exact token count. Useful for:
-        - Validating token estimation accuracy
-        - Debugging rate limiting issues
-
-        Args:
-            texts: Texts to count tokens for.
-
-        Returns:
-            Total token count across all texts.
-        """
-        result = await self._client.aio.models.count_tokens(
-            model=self._model,
-            contents=list(texts),
-        )
-        return int(result.total_tokens)
-
-    def count_tokens_local(self, texts: Sequence[str]) -> int:
-        """Count tokens locally using Vertex AI tokenizer.
-
-        No API call - uses local SentencePiece tokenizer.
-        First call downloads vocabulary (~1s), subsequent calls are instant.
-
-        Args:
-            texts: Texts to count tokens for.
-
-        Returns:
-            Total token count matching API's count_tokens().
-
-        Raises:
-            ValueError: If embedding model has no verified tokenizer mapping.
-        """
-        if self._model not in self.EMBEDDING_TO_TOKENIZER:
-            raise ValueError(
-                f"No verified tokenizer for '{self._model}'. Supported: {list(self.EMBEDDING_TO_TOKENIZER.keys())}",
-            )
-
-        tokenizer = tokenization.get_tokenizer_for_model(self.EMBEDDING_TO_TOKENIZER[self._model])
-        token_sum = sum(tokenizer.count_tokens(t).total_tokens for t in texts)
-        return token_sum + 1  # API adds BOS token
 
     @property
     def http_p50_ms(self) -> float:

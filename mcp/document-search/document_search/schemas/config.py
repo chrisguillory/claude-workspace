@@ -26,14 +26,13 @@ type EmbeddingProvider = Literal['gemini', 'openrouter']
 class GeminiConfig(StrictModel):
     """Gemini embedding configuration.
 
-    Requires requests_per_minute for API quota enforcement.
+    Concurrency is semaphore-bounded; the API quota is enforced reactively via 429 backoff.
     """
 
     provider: Literal['gemini'] = 'gemini'
     embedding_model: str
     embedding_dimensions: int
     batch_size: int
-    requests_per_minute: int
 
     @classmethod
     def default(cls) -> GeminiConfig:
@@ -42,7 +41,6 @@ class GeminiConfig(StrictModel):
             embedding_model='gemini-embedding-001',
             embedding_dimensions=768,
             batch_size=100,  # Max per Gemini API call
-            requests_per_minute=3000,
         )
 
 
@@ -97,5 +95,4 @@ def create_config(
         embedding_model=embedding_model or gemini.embedding_model,
         embedding_dimensions=embedding_dimensions or gemini.embedding_dimensions,
         batch_size=gemini.batch_size,
-        requests_per_minute=gemini.requests_per_minute,
     )
