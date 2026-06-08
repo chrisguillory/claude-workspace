@@ -1,4 +1,9 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(.claude/skills/create-pr/publish-plan.py:*)"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {
