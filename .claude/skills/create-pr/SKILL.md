@@ -116,6 +116,8 @@ Skip the section entirely if there's no plan.
 
 **Session provenance (always)** — end the body with: `<sub>Claude Code session <code>SESSION_ID</code></sub>` (the gather step prints the session ID; or `claude-session info`). ID only — the machine is recoverable from the ID across the mesh.
 
+**Public-repo PII gate (this repo is public).** Before writing the body — and again before create/update — scan **both the PR body and the diff** for workplace-identifying content: employer / workspace names, internal project / system / teamspace names, space IDs, private hostnames. Keep it workplace-neutral (generic scale metrics are fine — "~14K pages," not the workspace name); see CLAUDE.md → *Public Repository*. A leak in a pushed commit survives in history (and on forks / caches) even after a later fix — catch it here, scrub, re-commit, *then* open the PR.
+
 Write the file to `scratch/`.
 
 ### Phase 4: Pause for your review
@@ -157,6 +159,7 @@ you keep reviewability during the PR *and* a tidy history after.
 - **Never inline the PR body** — always `--body-file` (create) / `gh api -F body="$(cat ...)"` (update).
 - **REST API for updates** — `gh api -X PATCH`, never `gh pr edit --body`.
 - **Gather context first** — read the session (decisions, feedback) before drafting.
+- **Public-repo PII gate** — scan the body and the diff for workplace identifiers before create/update; this repo is public (CLAUDE.md → *Public Repository*).
 - **Scratch file is the collaboration point** — the user refines in their IDE; the model uses it as-is.
 - **What shipped, not the journey** — no iteration history in the body.
 - **Description ≠ CI layer** — carry the *why* + the empirical verification CI can't; never relitigate what CI proves (tests, lint, types).
@@ -179,3 +182,4 @@ you keep reviewability during the PR *and* a tidy history after.
 - **Amending / force-pushing an open PR** — destroys the reviewable "what changed since I last looked" view; add new commits instead.
 - **Wall-of-text body** — if the reader must scroll to get the gist, move depth into `<details>`.
 - **Bare `#N` / `@name`** — `#N` links to issue N and `@name` pings; use descriptive names or `item N`.
+- **Leaking workplace PII** — employer / workspace / project / teamspace names or space IDs in the body or the diff; this repo is public, so scrub before push (CLAUDE.md → *Public Repository*).
