@@ -19,9 +19,10 @@ worktree) on the target hosts, via the deterministic `deploy-main` CLI (`scripts
 
 **The line:** the CLI owns all git/crb mechanics — enumeration, classification, the clean merge, the
 typed report. This skill owns the judgment — run it, read the report, triage what didn't land. The
-deploy is **not gated**: nothing destructive happens — a dirty checkout merges only when its edits
-don't touch the incoming files, and git's own checks block the rest — so the default applies.
-`--dry-run` is there only if you want to look before you leap.
+deploy is **not gated**: a dirty checkout merges only when its edits don't touch the incoming files,
+and git refuses the rest (`blocked-*`), so your real work is never clobbered — only expendable
+git-ignored files can be overwritten (see Phase 1). The default applies; `--dry-run` is there only if
+you want to look before you leap.
 
 If `deploy-main` isn't on PATH: `scripts/install-launcher.sh scripts/deploy-main.py` (or run
 `scripts/deploy-main.py` directly).
@@ -42,7 +43,10 @@ Parse the `DeployResult` and present the per-host outcome:
 - `conflict` (+ files) — commit-level merge conflict; aborted, untouched.
 - `blocked-local` (+ files) — uncommitted **tracked** edits overlap the incoming change; git refuses.
 - `blocked-untracked` (+ files) — **untracked** files collide with incoming; git refuses (won't clobber them — *except git-ignored files, which it deems expendable and overwrites*).
+- `blocked-inprogress` — the checkout is mid-merge/rebase/cherry-pick/revert; left strictly untouched (aborting would destroy that in-progress operation).
 - `apply-aborted` — apply hit a blocker the dry-run couldn't foresee (a case-only filename collision on macOS's case-insensitive FS, or state that moved since the preview); the checkout is left untouched — re-run or inspect.
+
+A host with a **non-zero `exit_code`** (or non-null `error`) hit a gate failure (`no-repo`, `fetch-failed`, or unreachable) and ran **nothing** — its `checkouts` come back empty. Surface it loudly; never count it as deployed.
 
 Call out everything that isn't `merged`/`current` — those are what you weigh next. Re-running is safe
 and converges.
@@ -58,6 +62,8 @@ Decide with the user — never force-resolve a non-trivial case:
   are real work; the owner chooses how to preserve them.
 - **`blocked-untracked`** — the colliding files are untracked (often regenerable). Move/remove them
   on that host, then re-run. Never auto-delete untracked work.
+- **`blocked-inprogress`** — the checkout has an unfinished merge/rebase/cherry-pick/revert. Don't
+  touch it from here; the owner finishes or aborts that operation on the host, then re-runs.
 - **`conflict`** — trivial (lockfile, generated artifact, an unambiguous one-side change): resolve on
   that host with oversight, e.g.
   `claude-remote-bash execute -t <host> '<cd checkout && git merge origin/main && resolve && commit>'`.
