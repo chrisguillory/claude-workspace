@@ -9,6 +9,6 @@ __all__ = [
 from collections.abc import Sequence
 
 from preflight_check.checks.base import Check
+from preflight_check.checks.dns_resolver_wedge import DnsResolverWedge
 
-# Empty until the first check lands (dns_resolver_wedge).
-ALL_CHECKS: Sequence[Check] = ()
+ALL_CHECKS: Sequence[Check] = (DnsResolverWedge(),)

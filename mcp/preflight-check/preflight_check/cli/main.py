@@ -12,6 +12,7 @@ from cc_lib.cli import add_completion_command, add_help_command, create_app, run
 from cc_lib.error_boundary import ErrorBoundary
 
 from preflight_check.checks import ALL_CHECKS
+from preflight_check.checks.base import Fixable
 from preflight_check.report import render_report
 from preflight_check.runner import run_checks
 
@@ -30,6 +31,21 @@ def check() -> None:
         raise typer.Exit(2)
     if report.overall == 'warning':
         raise typer.Exit(1)
+
+
+@app.command()
+def fix(check_id: str) -> None:
+    """Apply a check's remediation by id (may require sudo)."""
+    for check in ALL_CHECKS:
+        if check.id == check_id:
+            if not isinstance(check, Fixable):
+                typer.echo(f'{check_id}: no fix available')
+                raise typer.Exit(1)
+            check.fix()
+            typer.echo(f'{check_id}: fix applied')
+            return
+    typer.echo(f'unknown check: {check_id!r}')
+    raise typer.Exit(1)
 
 
 @error_boundary

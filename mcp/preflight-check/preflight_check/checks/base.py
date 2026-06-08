@@ -5,10 +5,11 @@ from __future__ import annotations
 __all__ = [
     'Check',
     'Finding',
+    'Fixable',
     'Severity',
 ]
 
-from typing import ClassVar, Literal, Protocol
+from typing import ClassVar, Literal, Protocol, runtime_checkable
 
 from cc_lib.schemas.base import ClosedModel
 
@@ -36,4 +37,13 @@ class Check(Protocol):
 
     def detect(self) -> Finding:
         """Run the probe; return a Finding (severity 'ok' when healthy)."""
+        ...
+
+
+@runtime_checkable
+class Fixable(Protocol):
+    """A check that can remediate the condition it detects (may require sudo)."""
+
+    def fix(self) -> None:
+        """Apply the remediation. Raises on failure."""
         ...
