@@ -14,7 +14,7 @@ allowed-tools:
 
 A review / canvass / audit / implementation pass surfaced something real but not for now. Acting
 on it mid-flow derails the session — add it to the docket so it's off your plate, captured and
-versioned, and picked up later (ideally when a future refactor touches that *area* and folds in
+versioned, and picked up later (ideally when a future session touches that *area* and folds in
 everything local to it).
 
 Each entry is `docket/{type}/NN-{slug}.md`, reviewed in the diff you already use. See
@@ -45,7 +45,7 @@ overview (it didn't resolve a type), re-run it with the type:
 
 Draft per the type's README, fill the slug, append the Footer, and `Write` it to the path — the
 Write diff is the review. The entry rides into a PR like any change, and `tests/docket/` enforces
-per-dir `NN` uniqueness when it merges to main.
+the store's invariants when it merges to main.
 
 ## Key rules
 
@@ -53,7 +53,7 @@ per-dir `NN` uniqueness when it merges to main.
   captures and how deep it goes — that varies by type.
 - **The transcript holds the depth** — the footer's session ID recovers the full reasoning.
 - **Area + key files are load-bearing** — they make `rg -l 'area: X' docket/` (or a semantic
-  search over the docket) complete when a future refactor folds in everything local to that area.
+  search over the docket) complete when a future session folds in everything local to that area.
 - **Resolve is deletion** — git history is the archive.
 - **Just fix cheap/mechanical/repo-owned things inline** — the bar is human cost/risk, not
   out-of-scope-ness.
