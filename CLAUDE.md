@@ -586,6 +586,21 @@ Document **what's in the PR, not the journey**. Focus on deliverables and result
 
 **Entry point pattern:** `<name>` (CLI), `<name>-mcp` (MCP server), `<name>-daemon` (daemon). Role is suffixed, not prefixed. Source mirrors this: `cli/main.py`, `mcp/main.py`.
 
+### Path Templates vs CLI Placeholders
+
+Two placeholder notations, by purpose — never mix them in one token:
+
+- **File-system path templates use `{squiggly}` braces** — f-string style, the segment you fill in:
+  `docket/{type}/{NN}-{slug}.md`, `~/.claude/debug/{session_id}.txt`, `captures/{session_id}/`. Reads
+  as "substitute here," matches the f-strings the code emits, and is idiomatic across
+  OpenAPI/Flask/Python.
+- **CLI argument metavariables use `<angle>` brackets** — usage/`--help` text and invocation examples:
+  `deploy-main <target>`, `<name>-mcp`, `gather-context.py <type>`. Enumerations stay angle-pipe
+  (`<tech-debt|feature|follow-up|idea>`), never `{a,b,c}` (that's shell brace-expansion, which
+  collides with `{type}`).
+
+Test: a path segment locating/creating a file → `{braces}`; a token typed on a command line → `<angle>`.
+
 ### Ordering Conventions
 
 Lists of comparable entries are alphabetically sorted unless there's a semantic reason not to. Applies to workspace members in `pyproject.toml`, entry points, permission allow lists, tables of tools/servers, and import groups.
