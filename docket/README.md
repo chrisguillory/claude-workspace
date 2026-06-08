@@ -1,6 +1,6 @@
 # Docket
 
-Repo-native store for deferred work. An entry lives as `docket/<type>/NN-slug.md`, reviewed in the
+Repo-native store for deferred work. An entry lives as `docket/{type}/NN-{slug}.md`, reviewed in the
 normal PR flow and resolved by deleting the file — git history is the archive.
 
 Filed via the [`add-to-docket`](../.claude/skills/add-to-docket/SKILL.md) skill.

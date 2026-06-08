@@ -1,6 +1,6 @@
 ---
 name: add-to-docket
-description: "Add a deferred entry to the repo's docket — a versioned NN-slug.md under docket/<type>/ (tech-debt, feature, follow-up, or idea), reviewed in the normal PR flow and picked up later. Resolve by deleting the file."
+description: "Add a deferred entry to the repo's docket — a versioned NN-{slug}.md under docket/{type}/ (tech-debt, feature, follow-up, or idea), reviewed in the normal PR flow and picked up later. Resolve by deleting the file."
 argument-hint: "<tech-debt|feature|follow-up|idea> [short description]"
 user-invocable: true
 disable-model-invocation: false
@@ -17,8 +17,8 @@ on it mid-flow derails the session — add it to the docket so it's off your pla
 versioned, and picked up later (ideally when a future refactor touches that *area* and folds in
 everything local to it).
 
-Each entry is `docket/<type>/NN-slug.md`, reviewed in the diff you already use. See
-[`docket/README.md`](../../../docket/README.md) for the model; each `docket/<type>/README.md`
+Each entry is `docket/{type}/NN-{slug}.md`, reviewed in the diff you already use. See
+[`docket/README.md`](../../../docket/README.md) for the model; each `docket/{type}/README.md`
 codifies what that type is and what its entry looks like.
 
 The type comes from the invocation — the human names it; you don't classify. You usually already
@@ -31,7 +31,7 @@ hold the thing (you just surfaced it); recover fuzzy detail via
 
 For the named type, gather gives you:
 
-- **Write to** — `docket/<type>/NN-{slug}.md`, with `NN` already assigned. Fill `{slug}` with a
+- **Write to** — `docket/{type}/NN-{slug}.md`, with `NN` already assigned. Fill `{slug}` with a
   short kebab-case slug of the *effect* (`untyped-dicts-where-a-model-belongs`), not a ticket.
 - that type's **README**, pushed out inline — follow it for what the entry captures.
 - the **Footer** — append it verbatim (session provenance; the depth is recoverable from the
