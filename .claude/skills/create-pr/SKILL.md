@@ -67,6 +67,12 @@ get four headings):
 - **Test plan** — the **empirical residue**: what *you* verified that CI can't — "ran the
   real system, observed X," repro steps, edge cases, and **untested conditions + their
   risk**. Not "CI's green" — CI owns that.
+- **After merge (required)** — actions that have to happen once this lands, or the change is left
+  incomplete or broken: a data migration to run, an index to backfill, a dependent system to update
+  before it breaks against the new shape. List each as a task-list checkbox (`- [ ] …`) under a
+  heading named exactly `## After merge (required)`, so an automated sweep can find the unmet ones.
+  The bar is *broken or incomplete without it*; anything that merely *could* be done later belongs
+  elsewhere, not here. **Omit the section when there are none.**
 
 **Shape — write for an engineer skimming it for the first time:**
 
@@ -154,6 +160,7 @@ you keep reviewability during the PR *and* a tidy history after.
 - **Scratch file is the collaboration point** — the user refines in their IDE; the model uses it as-is.
 - **What shipped, not the journey** — no iteration history in the body.
 - **Description ≠ CI layer** — carry the *why* + the empirical verification CI can't; never relitigate what CI proves (tests, lint, types).
+- **After merge = required only** — post-merge actions that leave the change broken if skipped go under `## After merge (required)` as scrapable checkboxes; anything that merely *could* happen later belongs elsewhere, not the PR body.
 - **Title** — `type(scope): effect`, imperative, ≤50 chars; name the effect, not the mechanics.
 - **No force-push once open** — land follow-ons as new commits so the change-since-last-look stays visible; squash collapses them at merge.
 - **TLDR-first, depth in `<details>`** — write for a ~20-second skim, never a wall.
@@ -168,6 +175,7 @@ you keep reviewability during the PR *and* a tidy history after.
 - **Inlining the body in the command** — use `--body-file`.
 - **Journey residue** — "Following review…", dev chronology, padding.
 - **Restating CI** — "tests pass," "lint clean," "types check" is the CI layer's job; the body's test plan is for the empirical verification CI can't run.
+- **Orphaning a must-do** — a required post-merge action (migration, backfill) buried in the test plan or omitted; it's lost when the session ends. Put it under `## After merge (required)`. And keep the section to genuine must-dos — optional next-steps aren't tracked here; they belong in another system, not the PR body.
 - **Amending / force-pushing an open PR** — destroys the reviewable "what changed since I last looked" view; add new commits instead.
 - **Wall-of-text body** — if the reader must scroll to get the gist, move depth into `<details>`.
 - **Bare `#N` / `@name`** — `#N` links to issue N and `@name` pings; use descriptive names or `item N`.
