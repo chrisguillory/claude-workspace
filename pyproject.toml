@@ -20,6 +20,7 @@ members = [
     "mcp/document-search",
     "mcp/imessage-kit",
     "mcp/playwright-browser",
+    "mcp/preflight-check",
     "mcp/python-interpreter",
     "mcp/selenium-browser",
     "stubs",
@@ -157,6 +158,7 @@ mypy_path = "$MYPY_CONFIG_FILE_DIR/stubs"
 exclude = [
     ".venv",
     "scratch",
+    "context",  # machine-local archived data (e.g. .py code snippets inside Notion exports)
     "tests/linters/edge_cases",  # intentionally bad code — linter test inputs
 ]
 

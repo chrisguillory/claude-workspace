@@ -176,21 +176,19 @@ class EmbeddingInfo(StrictModel):
     """Embedding configuration for the collection's provider.
 
     Flattens provider-specific config into a single schema for display.
-    Provider-specific fields are None when not applicable.
     """
 
     provider: EmbeddingProvider
     model: str
     dimensions: int
     batch_size: int
-    requests_per_minute: int | None = None  # Set for Gemini; None for OpenRouter
 
     @classmethod
     def from_collection(cls, collection: Collection) -> EmbeddingInfo:
         """Create EmbeddingInfo from collection and provider operational settings.
 
         Combines collection-level settings (model, dimensions chosen at creation)
-        with provider-level operational settings (batch_size, requests_per_minute).
+        with provider-level operational settings (batch_size).
 
         Args:
             collection: Collection with provider and model configuration.
@@ -204,7 +202,6 @@ class EmbeddingInfo(StrictModel):
             model=collection.model,
             dimensions=collection.dimensions,
             batch_size=config.batch_size,
-            requests_per_minute=config.requests_per_minute,
         )
 
 

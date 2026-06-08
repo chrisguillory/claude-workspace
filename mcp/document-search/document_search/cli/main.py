@@ -590,8 +590,6 @@ async def _info_async(collection_name: str, paths: Sequence[str], format: Output
         typer.echo(f'  Provider: {embedding_info.provider}/{embedding_info.model}')
         typer.echo(f'  Dimensions: {embedding_info.dimensions}')
         typer.echo(f'  Batch size: {embedding_info.batch_size}')
-        if embedding_info.requests_per_minute is not None:
-            typer.echo(f'  Requests/min: {embedding_info.requests_per_minute}')
         typer.echo()
 
         typer.secho('Storage:', bold=True)

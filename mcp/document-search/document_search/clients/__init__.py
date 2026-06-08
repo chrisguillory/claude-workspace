@@ -34,7 +34,6 @@ def create_embedding_client(config: EmbeddingConfig) -> EmbeddingClient:
             return GeminiClient(
                 model=config.embedding_model,
                 output_dimensionality=config.embedding_dimensions,
-                requests_per_minute=config.requests_per_minute,
             )
         case OpenRouterConfig():
             from document_search.clients.openrouter import OpenRouterClient  # noqa: PLC0415  # lazy import
