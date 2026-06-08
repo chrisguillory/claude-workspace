@@ -7,15 +7,25 @@ disable-model-invocation: false
 effort: max
 allowed-tools:
   - "Bash(.claude/skills/create-pr/gather-pr-context.py:*)"
+  - "Bash(.claude/skills/create-pr/publish-plan.py:*)"
 ---
 
 # Create PR: Context → Draft → Review → Submit
 
 ## Gathered context
 
-!`.claude/skills/create-pr/gather-pr-context.py $ARGUMENTS`
+!`.claude/skills/create-pr/gather-pr-context.py "$ARGUMENTS"`
 
 ## Instructions
+
+> [!IMPORTANT]
+> **Run every phase — do not skip one because you think you can shortcut it.** Two skips are
+> specifically forbidden:
+> - **Phase 1 enrichment is mandatory even if you lived this session.** Your memory rounds off the
+>   user's exact corrections; the transcript doesn't. Search it.
+> - **Never drop a step over a judgment call** ("the plan has PII," "this arg looks fine"). Handle the
+>   concern *inside* the step — Phase 1: search anyway; Plan: have the user scrub. Skipping is the
+>   user's decision, not yours.
 
 ### Phase 1: Context enrichment
 
@@ -57,6 +67,12 @@ get four headings):
 - **Test plan** — the **empirical residue**: what *you* verified that CI can't — "ran the
   real system, observed X," repro steps, edge cases, and **untested conditions + their
   risk**. Not "CI's green" — CI owns that.
+- **After merge (required)** — actions that have to happen once this lands, or the change is left
+  incomplete or broken: a data migration to run, an index to backfill, a dependent system to update
+  before it breaks against the new shape. List each as a task-list checkbox (`- [ ] …`) under a
+  heading named exactly `## After merge (required)`, so an automated sweep can find the unmet ones.
+  The bar is *broken or incomplete without it*; anything that merely *could* be done later belongs
+  elsewhere, not here. **Omit the section when there are none.**
 
 **Shape — write for an engineer skimming it for the first time:**
 
@@ -74,6 +90,29 @@ get four headings):
 - `#N` already renders the issue's title on GitHub — don't also write the title yourself.
 - Closing keywords (`Fixes #N`) auto-close **only against the default branch** and fire on
   loose wording — use exactly one per genuinely-closed issue, `Refs #N` for related ones.
+
+**Claude Code Plan (when the session has one)** — the plan is Claude's launch point, not kept live after implementation, so treat it as *auxiliary origin context* parked at the **bottom**, never the headline. **First scan the plan for anything sensitive — secrets (tokens, keys) *and* personal/identifying details (private hostnames, home-network layout, personal paths, PII) — and sanitize it yourself** (genericize the specifics) — a gist is URL-reachable, so scrub it before it leaves the repo. Then publish the session's plan (a `*plan*.md` written this session, or a path the user names) — the **same** file, never a copy:
+
+```bash
+.claude/skills/create-pr/publish-plan.py <plan>
+```
+
+> [!IMPORTANT]
+> **Publishing is automatic** — the model runs `publish-plan.py` itself (a
+> `Bash(.claude/skills/create-pr/publish-plan.py:*)` allow-rule in `.claude/settings.json` clears the
+> data-exfiltration gate). That makes the **sanitize step above the only gate**, so it is mandatory:
+> genericize secrets + personal/network details before publishing — nothing else stands between the plan
+> and the gist.
+
+It creates the secret gist on first run and **reuses it on re-runs** (a local slug→gist-id store — no duplicate gists), then prints the gisthost viewer URL. Link it **just above the session-provenance trailer**, using that URL as the `href`:
+
+```html
+<a href="{viewUrl}">
+  <img src="https://github.com/user-attachments/assets/fcc9f9e9-e066-462d-9894-1f0ac2eda6f2" alt="Claude" width="16"> Claude Code Plan
+</a>
+```
+
+Skip the section entirely if there's no plan.
 
 **Session provenance (always)** — end the body with: `<sub>Claude Code session <code>SESSION_ID</code></sub>` (the gather step prints the session ID; or `claude-session info`). ID only — the machine is recoverable from the ID across the mesh.
 
@@ -121,10 +160,12 @@ you keep reviewability during the PR *and* a tidy history after.
 - **Scratch file is the collaboration point** — the user refines in their IDE; the model uses it as-is.
 - **What shipped, not the journey** — no iteration history in the body.
 - **Description ≠ CI layer** — carry the *why* + the empirical verification CI can't; never relitigate what CI proves (tests, lint, types).
+- **After merge = required only** — post-merge actions that leave the change broken if skipped go under `## After merge (required)` as scrapable checkboxes; anything that merely *could* happen later belongs elsewhere, not the PR body.
 - **Title** — `type(scope): effect`, imperative, ≤50 chars; name the effect, not the mechanics.
 - **No force-push once open** — land follow-ons as new commits so the change-since-last-look stays visible; squash collapses them at merge.
 - **TLDR-first, depth in `<details>`** — write for a ~20-second skim, never a wall.
 - **Session provenance** — end every body with `<sub>Claude Code session <id></sub>` (ID only).
+- **Claude Code Plan** — when the session has one, scrub it for secrets **and personal/PII details**, then publish via `.claude/skills/create-pr/publish-plan.py <plan>` (the *same* file; idempotent slug→id store, no duplicate gists) and link it at the **bottom**; auxiliary origin context.
 
 ## Anti-patterns
 
@@ -134,6 +175,7 @@ you keep reviewability during the PR *and* a tidy history after.
 - **Inlining the body in the command** — use `--body-file`.
 - **Journey residue** — "Following review…", dev chronology, padding.
 - **Restating CI** — "tests pass," "lint clean," "types check" is the CI layer's job; the body's test plan is for the empirical verification CI can't run.
+- **Orphaning a must-do** — a required post-merge action (migration, backfill) buried in the test plan or omitted; it's lost when the session ends. Put it under `## After merge (required)`. And keep the section to genuine must-dos — optional next-steps aren't tracked here; they belong in another system, not the PR body.
 - **Amending / force-pushing an open PR** — destroys the reviewable "what changed since I last looked" view; add new commits instead.
 - **Wall-of-text body** — if the reader must scroll to get the gist, move depth into `<details>`.
 - **Bare `#N` / `@name`** — `#N` links to issue N and `@name` pings; use descriptive names or `item N`.
