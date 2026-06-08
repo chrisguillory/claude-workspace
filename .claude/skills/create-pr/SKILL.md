@@ -91,11 +91,13 @@ get four headings):
 .claude/skills/create-pr/publish-plan.py <plan>
 ```
 
-> [!NOTE]
-> **The model cannot run this** — uploading the plan to an anyone-with-link gist trips the
-> data-exfiltration classifier (in-chat authorization can't clear it). Have the **user run it via the
-> `!` prefix** (their shell, outside the sandbox) and paste the viewer URL, or add a Bash permission
-> rule. Don't dead-end retrying it as the model.
+> [!IMPORTANT]
+> **Publishing is human-gated by design — do not try to make the model run it.** A gist is irreversible
+> egress, so the model **sanitizes** the plan (scrub secrets + personal/network details) but does **not**
+> push it. The **user** runs the publish as the final confirm on what leaves the repo:
+> `! .claude/skills/create-pr/publish-plan.py <plan>` — then pastes the viewer URL back for the model to
+> link. The data-exfiltration classifier blocking the model here is intended; don't defeat it with a
+> permission rule. The model's scan is the judgment gate; the human `!` is the egress gate.
 
 It creates the secret gist on first run and **reuses it on re-runs** (a local slug→gist-id store — no duplicate gists), then prints the gisthost viewer URL. Link it **just above the session-provenance trailer**, using that URL as the `href`:
 
