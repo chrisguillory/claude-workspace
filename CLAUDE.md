@@ -14,6 +14,12 @@ This repository contains Claude Code customizations for Chris Guillory, includin
 **Location:** `/Users/chris/claude-workspace`
 **GitHub:** `chrisguillory/claude-workspace`
 
+## Public Repository
+
+`chrisguillory/claude-workspace` is **public**. No workplace-identifying content in tracked files, commit messages, or PR descriptions — employer/workspace names, internal project/system/teamspace names, space IDs, private hostnames, or other employer PII. Generic scale metrics are fine once the employer context is stripped (e.g. "~14K pages," not the workspace name).
+
+Machine-local data (the `context/` archives) is gitignored and never leaves the machine; only the mechanism that maintains it is tracked. When promoting anything from a work context into the repo — docs, examples, PR bodies, docket entries — scrub identifiers first: a leak that reaches a pushed commit lives on in history (and on forks and caches) even after a later fix.
+
 ## Documentation Principles
 
 ### Core Philosophy
@@ -40,6 +46,10 @@ A docstring that needs to enumerate multiple concerns is a signal to split the f
 ### Application
 
 Before writing any documentation, comments, code descriptions, or commit messages, apply these principles to ensure consistency across the codebase.
+
+### Placeholders
+
+Mark a fill-in-the-blank with `{curly}` (f-string style) in prose, docs, and templates: `context/notion/{workspace}/`, `docket/{type}/NN-{slug}.md`. Reserve `<angle>` for **literal CLI argument syntax** — a command's usage line, where `<arg>` is the conventional shell notation: `process-notion-export.py <export.zip> [slug]`. Don't mix the two notations in one document.
 
 ## Code Quality Principles
 
