@@ -1,0 +1,4 @@
+# Machine-local Notion export archive — workspace data stays untracked
+*
+!.gitignore
+!README.md
