@@ -68,6 +68,14 @@ class PRContext(SubsetModel):
 @ErrorBoundary(exit_code=1)
 def main() -> None:
     base = sys.argv[1].strip() if len(sys.argv) > 1 and sys.argv[1].strip() else 'main'
+    if (
+        subprocess.run(['git', 'rev-parse', '--verify', '--quiet', base], capture_output=True, check=False).returncode
+        != 0
+    ):
+        raise SystemExit(
+            f'BASE_BRANCH must be a git ref (e.g. "main" or "origin/main"); got {base!r}. '
+            'The create-pr argument is the base branch to diff against, not a PR description.'
+        )
     print(PRContextGatherer(base).run())
 
 

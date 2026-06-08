@@ -14,9 +14,18 @@ allowed-tools:
 
 ## Gathered context
 
-!`.claude/skills/create-pr/gather-pr-context.py $ARGUMENTS`
+!`.claude/skills/create-pr/gather-pr-context.py "$ARGUMENTS"`
 
 ## Instructions
+
+> [!IMPORTANT]
+> **Run every phase — do not skip one because you think you can shortcut it.** Two skips are
+> specifically forbidden:
+> - **Phase 1 enrichment is mandatory even if you lived this session.** Your memory rounds off the
+>   user's exact corrections; the transcript doesn't. Search it.
+> - **Never drop a step over a judgment call** ("the plan has PII," "this arg looks fine"). Handle the
+>   concern *inside* the step — Phase 1: search anyway; Plan: have the user scrub. Skipping is the
+>   user's decision, not yours.
 
 ### Phase 1: Context enrichment
 
@@ -76,11 +85,18 @@ get four headings):
 - Closing keywords (`Fixes #N`) auto-close **only against the default branch** and fire on
   loose wording — use exactly one per genuinely-closed issue, `Refs #N` for related ones.
 
-**Claude Code Plan (when the session has one)** — the plan is Claude's launch point, not kept live after implementation, so treat it as *auxiliary origin context* parked at the **bottom**, never the headline. **First scan the plan for anything sensitive — secrets (tokens, keys) *and* personal/identifying details (private hostnames, home-network layout, personal paths, PII) — and have the user scrub it** — a gist is URL-reachable, so confirm before it leaves the repo. Then publish the session's plan (a `*plan*.md` written this session, or a path the user names) — the **same** file, never a copy:
+**Claude Code Plan (when the session has one)** — the plan is Claude's launch point, not kept live after implementation, so treat it as *auxiliary origin context* parked at the **bottom**, never the headline. **First scan the plan for anything sensitive — secrets (tokens, keys) *and* personal/identifying details (private hostnames, home-network layout, personal paths, PII) — and sanitize it yourself** (genericize the specifics) — a gist is URL-reachable, so scrub it before it leaves the repo. Then publish the session's plan (a `*plan*.md` written this session, or a path the user names) — the **same** file, never a copy:
 
 ```bash
 .claude/skills/create-pr/publish-plan.py <plan>
 ```
+
+> [!IMPORTANT]
+> **Publishing is automatic** — the model runs `publish-plan.py` itself (a
+> `Bash(.claude/skills/create-pr/publish-plan.py:*)` allow-rule in `.claude/settings.json` clears the
+> data-exfiltration gate). That makes the **sanitize step above the only gate**, so it is mandatory:
+> genericize secrets + personal/network details before publishing — nothing else stands between the plan
+> and the gist.
 
 It creates the secret gist on first run and **reuses it on re-runs** (a local slug→gist-id store — no duplicate gists), then prints the gisthost viewer URL. Link it **just above the session-provenance trailer**, using that URL as the `href`:
 
