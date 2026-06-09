@@ -1,0 +1,9 @@
+# mise: the project environment layer.
+# Activates this tree's uv-created `.venv` for any mise-aware entry point — a shell
+# running `mise activate`, or `mise exec` for a one-shot command.
+#
+# uv owns Python + dependencies; mise only *activates* the venv:
+#   create = false  → mise never recreates or fights uv's `.venv` (uv `uv venv`/`uv sync` owns it)
+# Each git worktree gets its own copy of this file, so `.venv` resolves per-worktree.
+[env]
+_.python.venv = { path = ".venv", create = false }
