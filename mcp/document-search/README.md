@@ -17,9 +17,10 @@ mkdir -p ~/.claude-workspace/secrets
 echo "your-key" > ~/.claude-workspace/secrets/document_search_api_key
 ```
 
-> **Rate Limits**: Free tier is limited to **100 requests/day**. For production use,
-> [enable billing](https://ai.google.dev/gemini-api/docs/rate-limits) to unlock Tier 1
-> (1,000 RPD, 300 RPM). See [Rate Limits](#gemini-api-rate-limits) below.
+> **Rate Limits**: The quota is metered per **embedding** (text), not per request, and capped
+> **daily**. Free tier allows ~100 embeddings/day; for production use,
+> [enable billing](https://ai.google.dev/gemini-api/docs/rate-limits) to unlock Tier 1's larger
+> daily cap. See [Rate Limits](#gemini-api-rate-limits) below.
 
 **MCP timeout** (default 2min is too short for large directories):
 
@@ -181,17 +182,19 @@ markdown, text, pdf, json, jsonl, csv, email (.eml), images (placeholder for fut
 
 ## Gemini API Rate Limits
 
-**Before January 2026**: `text-embedding-004` had no explicit daily request cap—only RPM limits (~10-20 RPM free tier).
-High-volume batch indexing worked without issues.
+Quota is metered per **embedding** (each text counts; a batched request of N texts costs N), and the
+hard operational constraint is a **daily** cap on `gemini-embedding-001`.
 
-**After January 2026**: Google shutdown `text-embedding-004` and enforced strict daily caps on `gemini-embedding-001`
-due to fraud/abuse.
+| Tier                          | Embeddings/Day | Cost            |
+|-------------------------------|----------------|-----------------|
+| Free                          | ~100           | $0              |
+| Tier 1 (billing enabled)      | larger         | $0.15/1M tokens |
+| Tier 2 ($250+ spend, 30 days) | larger still   | $0.15/1M tokens |
 
-| Tier                          | Requests/Day | Requests/Min | Cost            |
-|-------------------------------|--------------|--------------|-----------------|
-| Free                          | **100**      | ~100         | $0              |
-| Tier 1 (billing enabled)      | 1,000        | 300          | $0.15/1M tokens |
-| Tier 2 ($250+ spend, 30 days) | 10,000+      | 1,000+       | $0.15/1M tokens |
+The free tier is insufficient for indexing more than ~100 documents — enable billing for Tier 1.
 
-**For RAG/indexing workloads**: Free tier (100 RPD) is insufficient for indexing more than ~100 documents. Enable
-billing to unlock Tier 1.
+**Reactive rate handling.** The client keeps no rate bucket. Concurrency is semaphore-bounded and
+requests are sent until the API pushes back with a 429 (`RESOURCE_EXHAUSTED`, carrying a `QuotaFailure`
+and a `RetryInfo`). On a 429 the client honors `RetryInfo.retryDelay` (capped at 16s, plus jitter to
+desynchronize parallel fan-out); absent a usable hint it falls back to exponential backoff. This
+adapts to whatever per-minute throttle the tier actually enforces without hardcoding a number.
