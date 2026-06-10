@@ -9,15 +9,18 @@ __all__ = [
 import socket
 import subprocess
 import sys
+import time
 from typing import ClassVar
 
-from preflight_check.checks.base import Finding
+from preflight_check.checks.base import Finding, FixFailedError
 
 PROBE_HOST = 'one.one.one.one'
 RAW_IP = '1.1.1.1'
 PROBE_PORT = 443
 CONNECT_TIMEOUT = 3.0
-KICKSTART = 'sudo launchctl kickstart -k system/com.apple.mDNSResponder'
+RESTART = 'sudo killall -9 mDNSResponder'
+VERIFY_DEADLINE = 15.0
+VERIFY_POLL = 0.5
 
 
 class DnsResolverWedge:
@@ -56,7 +59,7 @@ class DnsResolverWedge:
                     f'getaddrinfo({PROBE_HOST}) fails but {RAW_IP}:{PROBE_PORT} is reachable — '
                     'mDNSResponder is wedged (common after sleep/wake). Every getaddrinfo-based tool will fail.'
                 ),
-                remedy=f'{KICKSTART}   (or: preflight-check fix dns_resolver_wedge)',
+                remedy=f'{RESTART}   (or: preflight-check fix dns_resolver_wedge)',
             )
         return Finding(
             check_id=self.id,
@@ -70,9 +73,23 @@ class DnsResolverWedge:
         )
 
     def fix(self) -> None:
-        # SIP-protected: kickstart resets resolver state in place; killall -HUP is the fallback.
-        inner = 'launchctl kickstart -k system/com.apple.mDNSResponder || killall -HUP mDNSResponder'
-        subprocess.run(['sudo', 'sh', '-c', inner], check=True)
+        """SIGKILL mDNSResponder so launchd respawns it fresh; verify recovery by re-detection.
+
+        The only restart SIP permits: ``launchctl kickstart``/``kill`` are refused even as root,
+        and SIGTERM returns 0 yet is silently ignored (PID unchanged) — exit codes lie here, so
+        success is only ever the re-detect coming back healthy.
+        """
+        before = _resolver_pid()
+        subprocess.run(['sudo', 'killall', '-9', 'mDNSResponder'], check=True)
+        deadline = time.monotonic() + VERIFY_DEADLINE
+        while time.monotonic() < deadline:
+            time.sleep(VERIFY_POLL)
+            if self.detect().severity == 'ok':
+                return
+        raise FixFailedError(
+            f'resolver still wedged {VERIFY_DEADLINE:.0f}s after {RESTART!r} '
+            f'(mDNSResponder pid {before} -> {_resolver_pid()}) — reboot the host'
+        )
 
 
 def _resolves(host: str) -> bool:
@@ -90,3 +107,10 @@ def _reachable(ip: str, port: int) -> bool:
             return True
     except OSError:
         return False
+
+
+def _resolver_pid() -> int | None:
+    # pgrep exit 1 means no such process — an expected state mid-respawn, not an error.
+    result = subprocess.run(['pgrep', '-x', 'mDNSResponder'], capture_output=True, text=True, check=False)
+    pids = result.stdout.split()
+    return int(pids[0]) if pids else None

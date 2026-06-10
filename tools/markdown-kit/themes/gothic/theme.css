@@ -108,6 +108,16 @@ p > img:only-child {
 dt { font-weight: bold; margin-top: 0.5em; }
 dd { margin-left: 2em; margin-bottom: 0.5em; }
 
+/* === BOLD / STRONG === */
+
+/* Without an explicit rule the UA default `font-weight: bolder` applies,
+ * and bolder is RELATIVE: from body's 300 it computes to 400 in every
+ * context — the regular face — so bold was invisible everywhere (the
+ * bundled texgyreadventor-bold.woff went unused). Pin it absolute. */
+strong, b {
+    font-weight: bold;
+}
+
 /* === HEADINGS === */
 
 h1, h2, h3, h4, h5, h6 {
