@@ -1747,7 +1747,7 @@ wheels = [
 
 [[package]]
 name = "preflight-check"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "mcp/preflight-check" }
 dependencies = [
     { name = "cc-lib" },

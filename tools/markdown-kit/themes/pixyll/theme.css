@@ -123,6 +123,17 @@ p {
     line-height: 1.8;
 }
 
+/* === BOLD / STRONG === */
+
+/* Without an explicit rule the UA default `font-weight: bolder` applies,
+ * and bolder is RELATIVE: from p's 300 it computes to 400 — which the
+ * @font-face map above resolves to the light Merriweather face — so bold
+ * was invisible in paragraph prose and mermaid HTML labels while working
+ * in li/td (which inherit body's 400 → 700). Pin it absolute. */
+strong, b {
+    font-weight: bold;
+}
+
 /* === LINKS === */
 
 a {
