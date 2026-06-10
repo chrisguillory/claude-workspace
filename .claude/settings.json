@@ -1,8 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(.claude/skills/create-pr/publish-evidence.py:*)",
-      "Bash(.claude/skills/create-pr/publish-plan.py:*)"
+      "Bash(.claude/skills/create-pr/publish-plan.py:*)",
+      "Bash(scripts/gh-upload.py:*)"
     ]
   },
   "hooks": {

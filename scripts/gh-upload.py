@@ -16,8 +16,11 @@ GitHub's file upload endpoint requires web session auth — gh CLI OAuth tokens
 don't work. This script uses browser cookies saved via Selenium MCP profile state.
 
 Usage:
-    gh_upload.py <file_path> [<file_path2> ...]
-    # Outputs markdown links: [file.csv](https://github.com/user-attachments/files/...)
+    gh_upload.py [--repo owner/name] <file_path> [<file_path2> ...]
+    # Repo defaults to the cwd's gh context (gh repo view).
+    # Outputs markdown per file — images as embeds, other files as links:
+    #   ![shot.png](https://github.com/user-attachments/assets/...)
+    #   [data.csv](https://github.com/user-attachments/files/...)
 
 Prerequisites:
     1. Navigate to github.com in Chromium via Selenium MCP with profile state
@@ -27,7 +30,9 @@ Prerequisites:
 
 from __future__ import annotations
 
+import json
 import re
+import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -38,9 +43,6 @@ from cc_lib.schemas.base import SubsetModel
 from cc_lib.types import JsonDatetime
 from cc_lib.utils import get_claude_workspace_config_home_dir
 
-# Hardcoded for personal use with mainstay-io/monorepo
-REPO_SLUG = 'mainstay-io/monorepo'
-REPO_ID = '839989396'
 SESSION_FILE = get_claude_workspace_config_home_dir() / 'scripts' / 'gh_upload_session.json'
 
 # MIME type mapping for common file extensions
@@ -101,32 +103,74 @@ boundary = ErrorBoundary(exit_code=1)
 
 def main() -> None:
     """Entry point: validate file paths and upload."""
-    if len(sys.argv) < 2:
-        print(f'Usage: {sys.argv[0]} <file> [<file2> ...]', file=sys.stderr)
+    args = sys.argv[1:]
+    repo_override = None
+    if args and args[0] == '--repo':
+        if len(args) < 2:
+            print('ERROR: --repo requires owner/name', file=sys.stderr)
+            sys.exit(1)
+        repo_override = args[1]
+        args = args[2:]
+    if not args:
+        print(f'Usage: {sys.argv[0]} [--repo owner/name] <file> [<file2> ...]', file=sys.stderr)
         sys.exit(1)
 
     # Validate all file paths up front (fail-fast)
-    file_paths = [Path(arg) for arg in sys.argv[1:]]
+    file_paths = [Path(arg) for arg in args]
     for path in file_paths:
         if not path.is_file():
             print(f'ERROR: {path} not found or not a regular file', file=sys.stderr)
             sys.exit(1)
 
-    upload_files(file_paths)
+    upload_files(file_paths, repo_override)
 
 
 @boundary
-def upload_files(file_paths: Sequence[Path]) -> None:
-    """Load session and upload files. ErrorBoundary catches exceptions."""
-    session = load_session()
-    nonce = get_fresh_nonce(session)
+def upload_files(file_paths: Sequence[Path], repo_override: str | None = None) -> None:
+    """Resolve repo, load session, and upload files. ErrorBoundary catches exceptions."""
+    repo_slug, repo_id = resolve_repo(repo_override)
+    session = load_session(repo_slug)
+    nonce = get_fresh_nonce(session, repo_slug)
 
     for file_path in file_paths:
-        url = upload_file(session, nonce, file_path)
-        print(f'[{file_path.name}]({url})')
+        url = upload_file(session, nonce, file_path, repo_id)
+        embed = '!' if mime_for(file_path).startswith('image/') else ''
+        print(f'{embed}[{file_path.name}]({url})')
 
 
-def load_session() -> httpx.Client:
+def resolve_repo(override: str | None) -> tuple[str, str]:
+    """Resolve repo slug + numeric id — from --repo, else the cwd's gh context.
+
+    The upload policy endpoint wants the repository's numeric database id,
+    which only the REST API exposes (GraphQL-backed `gh repo view` has no
+    databaseId field).
+    """
+    slug = (
+        override
+        or subprocess.run(
+            ['gh', 'repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    )
+    repo = json.loads(
+        subprocess.run(
+            ['gh', 'api', f'repos/{slug}'],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    )
+    return repo['full_name'], str(repo['id'])
+
+
+def mime_for(file_path: Path) -> str:
+    """MIME type for a file, by extension."""
+    return MIME_TYPES.get(file_path.suffix.lower(), DEFAULT_MIME_TYPE)
+
+
+def load_session(repo_slug: str) -> httpx.Client:
     """Load GitHub session from saved browser profile state.
 
     GitHub's /upload/policies/assets endpoint requires:
@@ -149,7 +193,7 @@ def load_session() -> httpx.Client:
             'Accept': 'application/json',
             'GitHub-Verified-Fetch': 'true',
             'X-Requested-With': 'XMLHttpRequest',
-            'Referer': f'https://github.com/{REPO_SLUG}/issues/new',
+            'Referer': f'https://github.com/{repo_slug}/issues/new',
             'Origin': 'https://github.com',
             'sec-fetch-site': 'same-origin',
             'sec-fetch-mode': 'cors',
@@ -162,7 +206,7 @@ def load_session() -> httpx.Client:
     )
 
 
-def get_fresh_nonce(client: httpx.Client) -> str:
+def get_fresh_nonce(client: httpx.Client, repo_slug: str) -> str:
     """Fetch issues/new page to extract CSRF nonce tied to this session.
 
     The X-Fetch-Nonce is cryptographically bound to the session cookies. Each
@@ -173,7 +217,7 @@ def get_fresh_nonce(client: httpx.Client) -> str:
     Raises UploadError if nonce cannot be extracted from page.
     """
     resp = client.get(
-        f'https://github.com/{REPO_SLUG}/issues/new',
+        f'https://github.com/{repo_slug}/issues/new',
         headers={
             'Accept': 'text/html',
             'sec-fetch-site': 'none',
@@ -194,7 +238,7 @@ def get_fresh_nonce(client: httpx.Client) -> str:
     return nonce
 
 
-def upload_file(client: httpx.Client, nonce: str, file_path: Path) -> str:
+def upload_file(client: httpx.Client, nonce: str, file_path: Path, repo_id: str) -> str:
     """Upload file to GitHub via 3-step flow.
 
     GitHub's file upload flow (captured via HAR from browser):
@@ -211,13 +255,13 @@ def upload_file(client: httpx.Client, nonce: str, file_path: Path) -> str:
     """
     file_name = file_path.name
     file_size = file_path.stat().st_size
-    mime = MIME_TYPES.get(file_path.suffix.lower(), DEFAULT_MIME_TYPE)
+    mime = mime_for(file_path)
 
     # Step 1: Get upload policy from GitHub
     resp = client.post(
         'https://github.com/upload/policies/assets',
         data={
-            'repository_id': REPO_ID,
+            'repository_id': repo_id,
             'name': file_name,
             'size': str(file_size),
             'content_type': mime,
