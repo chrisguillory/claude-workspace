@@ -5,6 +5,7 @@ from __future__ import annotations
 __all__ = [
     'Check',
     'Finding',
+    'FixFailedError',
     'Fixable',
     'Severity',
 ]
@@ -45,5 +46,9 @@ class Fixable(Protocol):
     """A check that can remediate the condition it detects (may require sudo)."""
 
     def fix(self) -> None:
-        """Apply the remediation. Raises on failure."""
+        """Apply the remediation and verify it took; raise FixFailedError if the condition persists."""
         ...
+
+
+class FixFailedError(Exception):
+    """fix() ran its remediation, but re-detection shows the condition persists."""

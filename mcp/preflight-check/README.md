@@ -7,7 +7,8 @@ Machine and mesh readiness checks for Claude Code sessions — *is this machine 
 ## Usage
 
 ```bash
-preflight-check check        # run all checks on the current machine
+preflight-check check                    # run all checks on the current machine
+preflight-check fix dns_resolver_wedge   # apply a check's remediation + verify (sudo)
 ```
 
 Exit codes: `0` healthy, `1` warning, `2` critical.
