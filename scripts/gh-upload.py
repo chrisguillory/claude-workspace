@@ -26,6 +26,9 @@ Prerequisites:
     1. Navigate to github.com in Chromium via Selenium MCP with profile state
     2. save_profile_state("~/.claude-workspace/scripts/gh_upload_session.json")
     3. Session cookies last ~2 weeks. Re-save if uploads start failing (422).
+
+Uploads are permanent — user-attachments have no delete API. Check content
+(PII, secrets) before uploading.
 """
 
 from __future__ import annotations
