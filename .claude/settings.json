@@ -1,6 +1,7 @@
 {
   "permissions": {
     "allow": [
+      "Bash(.claude/skills/create-pr/publish-evidence.py:*)",
       "Bash(.claude/skills/create-pr/publish-plan.py:*)"
     ]
   },
