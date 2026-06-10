@@ -8,6 +8,7 @@ effort: max
 allowed-tools:
   - "Bash(.claude/skills/create-pr/gather-pr-context.py:*)"
   - "Bash(.claude/skills/create-pr/publish-plan.py:*)"
+  - "Bash(scripts/gh-upload.py:*)"
 ---
 
 # Create PR: Context → Draft → Review → Submit
@@ -79,6 +80,13 @@ get four headings):
 - **TLDR-first, scannable, never imposing** — the gist in a ~20-second skim, no scrolling.
 - **`<details>` for depth** — collapse mechanism write-ups, evidence, and long lists; keep at most one high-impact item at top level.
 - **Reach for GitHub-Flavored Markdown when it beats prose** (all verified to render in a PR body) — a **table** for options / tradeoffs, an **alert** (`> [!WARNING]` / `> [!NOTE]`) for a caveat or breaking change, a **Mermaid** fenced block for architecture or flow, fenced **code** for commands + output, a **footnote** (`[^1]`) for an aside. Use only when it out-scans prose — a one-line fix needs none. **Mermaid is the only diagram engine GitHub renders**; Graphviz / D2 / PlantUML / Vega-Lite and `:::` containers / `==highlight==` fall back to raw text, so don't reach for them.
+- **Screenshots / visual evidence** — for rendering, UI, or layout work, pixels out-evidence prose. PR bodies render images **only from URLs** (base64 data URIs are stripped; local paths don't upload), so upload them first:
+
+  ```bash
+  scripts/gh-upload.py <image>...
+  ```
+
+  Prints a paste-ready markdown line per file (`![name](url)` for images) pointing at a permanent first-party `user-attachments` URL — the same kind drag-dropping into the web editor produces; failure modes self-report with their remedy. Pair before/after captures in a table or side-by-side inside `<details>`. Uploading is auto-allowed like `publish-plan.py`, which makes the check before it the only gate: **the public-repo PII gate applies to pixels** — screenshots carry window chrome, document titles, and content vocabulary, so re-capture with generic content rather than upload-then-scrub (uploads are permanent; there is no delete).
 - **Terse but COMPLETE** — don't drop substance, hide it (push the bulk into `<details>`).
 - **What & why, not how. No journey residue** — no "Following review…", no dev chronology, no AI fluff; readable by someone who never saw this session.
 - **Re-verify numerical claims** (test counts, perf metrics) against current code before finalizing.
@@ -166,7 +174,9 @@ you keep reviewability during the PR *and* a tidy history after.
 - **After merge = required only** — post-merge actions that leave the change broken if skipped go under `## After merge (required)` as scrapable checkboxes; anything that merely *could* happen later belongs elsewhere, not the PR body.
 - **Title** — `type(scope): effect`, imperative, ≤50 chars; name the effect, not the mechanics.
 - **No force-push once open** — land follow-ons as new commits so the change-since-last-look stays visible; squash collapses them at merge.
+- **Don't flip the user's checkout** — a second PR in one session builds in a `git worktree` (or commits, then restores the branch the user was on); their working copy and uncommitted WIP stay where they left them.
 - **TLDR-first, depth in `<details>`** — write for a ~20-second skim, never a wall.
+- **Visual evidence via `scripts/gh-upload.py`** — screenshots/renders upload to permanent first-party `user-attachments` URLs (same as web drag-drop); the pixel-level PII check happens before uploading, by re-capturing clean.
 - **Session provenance** — end every body with `<sub>Claude Code session <id></sub>` (ID only).
 - **Claude Code Plan** — when the session has one, scrub it for secrets **and personal/PII details**, then publish via `.claude/skills/create-pr/publish-plan.py <plan>` (the *same* file; idempotent slug→id store, no duplicate gists) and link it at the **bottom**; auxiliary origin context.
 
@@ -181,5 +191,6 @@ you keep reviewability during the PR *and* a tidy history after.
 - **Orphaning a must-do** — a required post-merge action (migration, backfill) buried in the test plan or omitted; it's lost when the session ends. Put it under `## After merge (required)`. And keep the section to genuine must-dos — optional next-steps aren't tracked here; they belong in another system, not the PR body.
 - **Amending / force-pushing an open PR** — destroys the reviewable "what changed since I last looked" view; add new commits instead.
 - **Wall-of-text body** — if the reader must scroll to get the gist, move depth into `<details>`.
+- **Screenshots left on disk** — arguing a visual change in prose while the captures sit in a temp dir; upload via `scripts/gh-upload.py` and embed them.
 - **Bare `#N` / `@name`** — `#N` links to issue N and `@name` pings; use descriptive names or `item N`.
 - **Leaking workplace PII** — employer / workspace / project / teamspace names or space IDs in the body or the diff; this repo is public, so scrub before push (CLAUDE.md → *Public Repository*).
