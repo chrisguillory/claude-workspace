@@ -23,8 +23,11 @@ import json
 import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
+PACIFIC = ZoneInfo('America/Los_Angeles')
 PROJECTS = Path.home() / '.claude' / 'projects'
 # user-role messages that are injected noise, not directives — dropped from the spine
 SKIP = (
@@ -88,7 +91,9 @@ def _write_spine(transcript: Path, dst: Path) -> int:
         if not text or any(s in text[:120] for s in SKIP):
             continue
         n += 1
-        timestamp = record.get('timestamp', '')
+        # transcript timestamps are UTC ISO; convert once here so no downstream consumer renders a UTC slip
+        raw = record.get('timestamp', '')
+        timestamp = f'{datetime.fromisoformat(raw).astimezone(PACIFIC):%Y-%m-%d %I:%M%p} PT' if raw else ''
         out.append(f'[{n}] {timestamp}\n{text if len(text) <= 1400 else text[:1400] + " …[trunc]"}\n')
     dst.write_text('\n'.join(out))
     return n

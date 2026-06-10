@@ -39,19 +39,23 @@ return only a one-line confirmation — not the map itself (you'll `cat` it).
 something they explicitly reacted to ("let's do that", "great — build on it"). NOT system notifications,
 NOT other-sessions merely discovered, NOT AI-incidental work or tooling — those are HOW, not goals.
 Commits / PR-numbers / assistant-work are NEVER nodes; they only decide a node's check-mark. Multiple
-roots for independent threads; sub-bullets for the sub-quests under each.
+roots for independent threads, numbered `[1]`..`[N]` — the handle for paging a node in later; sub-bullets
+for the sub-quests under each.
 
 **Header.** YAML frontmatter first (machine-readable: session, span, volume, skills, roots, provenance),
 then a prose header line:
 `WHERE AM I — session {id} "{title}" · [{from} → {to}] ~{span} · {n} msgs · {compactions} compactions · {subagents} subagents · most-used: {top skills}`
 followed by one honest "the shape of it" sentence — how a person would narrate the arc to a colleague.
+Frontmatter counts (`roots.total` / `landed` / `open`) must match the rendered tree exactly.
 
 **Check-marks.** `✓` = landed (verified against truth); the **absence** of a mark = open. No other emojis.
+A root is marked `✓` on its own line when its goal landed; it stays unmarked while a sub-quest is open.
 
 **Date ranges — `[from → to]`** (square brackets, the definitive notation), computed from spine
-timestamps. Per item `[first-touched → last-touched]`; for an open/abandoned item the end = **when we
-lost it** (last activity). For an open item touched **within the last week**, include the time:
-`[… → 6/8 3pm]` — a finer how-recently-did-this-go-cold signal.
+timestamps (already Pacific — render as-is, never re-interpret as UTC). Per item
+`[first-touched → last-touched]`; for an open/abandoned item the end = **when we lost it** (last
+activity). For an open item touched **within the last week**, include the time: `[… → 6/8 3pm]` — a
+finer how-recently-did-this-go-cold signal.
 
 **PR / docket overlays — never structural.** Below the tree: a PR overlay where a PR spanning multiple
 roots floats on its own line *above* the roots it served, and a PR within one root attaches to that
@@ -62,7 +66,8 @@ bend to fit PR or docket boundaries.
 session the user then built on), note its origin (session, machine, still-alive?). It counts as a node
 only if the user reacted to it.
 
-**Footer.** End with `— open parent quests never popped back up to —`: the dangling frames, oldest first.
+**Footer.** End with `— open parent quests never popped back up to —`: the dangling frames, sorted
+oldest-first by their start date.
 
 **Conventions.** Arrows are `→` / `←`, never ASCII `->`. File paths use `{squiggly}` braces, never
 `<angle>` (angle brackets are for CLI help text only). Plain ASCII tree, glanceable in seconds. Top
