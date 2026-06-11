@@ -29,6 +29,7 @@ claude-workspace/
 ├── commands/                   # Custom slash commands
 ├── skills/                     # Auto-activating capabilities
 ├── configs/                    # Configuration templates
+├── dotfiles/                   # Shell environment: zsh config + Brewfile + installer
 ├── CLAUDE.md                   # Coding standards
 └── README.md
 ```
