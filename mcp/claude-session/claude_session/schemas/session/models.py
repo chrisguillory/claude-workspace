@@ -312,6 +312,20 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   envelope (formatted + isNetworkDown, no status) also carries request-timeouts
                   ({connection: null, isNetworkDown: false}); the binary's VU(H) connection builder
                   returns null when there is no socket-level failure. MAX unchanged (2.1.163).
+- Schema v0.2.44: Claude Code 2.1.172 (Claude Fable 5 era). ModelRefusalFallbackSystemRecord
+                  (subtype model_refusal_fallback: API-side refusal -> fallback retry; producer
+                  ≤2.1.162, surfaced in JSONL by Fable refusal fallbacks 2.1.170+) and
+                  ModelFallbackSystemRecord (subtype model_fallback: model_not_found |
+                  permission_denied availability fallback; producer ≤2.1.162). ArtifactToolInput
+                  (new built-in publishing .html/.md to a private claude.ai page; introduced
+                  2.1.164-2.1.172). ModelId += claude-fable-5, claude-mythos-5 (2.1.170).
+                  UserRecordOrigin.kind += human (2.1.172 adds a real producer on the
+                  resume-background-agent path, retiring the consumer-guard-only note).
+                  FallbackContent message block ({type:fallback, from{model}, to{model}};
+                  server_fallback stream events are never persisted). UsageIteration gained
+                  type fallback_message and a per-iteration model field.
+                  frame-link routing key removed upstream (was never modeled). Extended
+                  CLAUDE_CODE_MAX_VERSION to 2.1.172.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -399,6 +413,7 @@ __all__ = [
     'ApiErrorResponse',
     'ApiErrorSystemRecord',
     'AppliedEdit',
+    'ArtifactToolInput',
     'AskUserQuestionToolInput',
     'AskUserQuestionToolResult',
     'AssistantRecord',
@@ -463,6 +478,8 @@ __all__ = [
     'ExitPlanModeToolResult',
     'ExitWorktreeToolInput',
     'ExitWorktreeToolResult',
+    'FallbackContent',
+    'FallbackModelRef',
     'FastMcpMeta',
     'FileAttachment',
     'FileAttachmentContent',
@@ -520,6 +537,8 @@ __all__ = [
     'MessageDiagnostics',
     'MicrocompactBoundarySystemRecord',
     'MicrocompactMetadata',
+    'ModelFallbackSystemRecord',
+    'ModelRefusalFallbackSystemRecord',
     'MonitorToolInput',
     'NestedMemoryAttachment',
     'NestedMemoryContent',
@@ -662,9 +681,9 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.43'
+SCHEMA_VERSION = '0.2.44'
 CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
-CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.163')
+CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.172')
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -1351,6 +1370,19 @@ class MCPToolInput(PermissiveModel):
     """
 
 
+class ArtifactToolInput(StrictModel):
+    """Input for Artifact tool - publishes an .html/.md file to a private claude.ai page.
+
+    Binary strictObject ``{file_path, favicon (one or two emoji), label?, url?}``.
+    Introduced between Claude Code 2.1.163 and 2.1.172 (absent in 2.1.163).
+    """
+
+    file_path: PathField
+    favicon: str
+    label: str | None = None
+    url: str | None = None
+
+
 class StructuredOutputToolInput(PermissiveModel):
     """Input for the StructuredOutput built-in (Workflow structured output, 2.1.146+).
 
@@ -1371,6 +1403,7 @@ ToolInput = Annotated[
     | EditToolInput  # file_path, old_string, new_string required
     | NotebookEditToolInput  # notebook_path, new_source required
     | ReadToolInput  # file_path required
+    | ArtifactToolInput  # file_path, favicon required
     # Multi-field tools
     | SendMessageToolInput  # to, message, type, recipient, content required (backfilled wire shape)
     | SendMessageSimpleToolInput  # to, message required (2.1.81+)
@@ -1531,8 +1564,34 @@ class ToolResultContent(StrictModel):
 
 
 # Discriminated union of all message content types
+class FallbackModelRef(StrictModel):
+    """Model reference inside a FallbackContent from/to pair."""
+
+    model: ModelId
+
+
+class FallbackContent(StrictModel):
+    """Content block marking a mid-turn model fallback (Claude Fable 5 era).
+
+    Binary ``{type:"fallback",from:{model:H.fromModel},to:{model:H.model}}`` -- persisted
+    into assistant message content when a turn is served by a fallback model (e.g. a Fable
+    refusal retried on Opus). The sibling ``server_fallback`` stream event is never
+    persisted. ``from`` is a Python keyword -- aliased per the legitimate-alias rule.
+    """
+
+    type: Literal['fallback']
+    from_: FallbackModelRef = pydantic.Field(alias='from')
+    to: FallbackModelRef
+
+
 MessageContent = Annotated[
-    ThinkingContent | TextContent | ToolUseContent | ToolResultContent | ImageContent | DocumentContent,
+    ThinkingContent
+    | TextContent
+    | ToolUseContent
+    | ToolResultContent
+    | ImageContent
+    | DocumentContent
+    | FallbackContent,
     pydantic.Field(discriminator='type'),
 ]
 
@@ -1717,7 +1776,8 @@ class UsageIteration(StrictModel):
     cache_creation_input_tokens: int
     cache_read_input_tokens: int
     cache_creation: CacheCreation
-    type: Literal['message']
+    type: Literal['fallback_message', 'message']  # last updated 2.1.172
+    model: ModelId | None = None  # Model that served this iteration (fallback era; absent on older records)
 
 
 class OutputTokensDetails(StrictModel):
@@ -2802,10 +2862,13 @@ class ForkOrigin(StrictModel):
 class UserRecordOrigin(StrictModel):
     """Origin metadata shared by UserRecord.origin and QueuedCommandAttachment.origin (2.1.87+).
 
-    kind is the closed origin-producer set; 'human' is consumer-guard-only (no producer).
+    kind is the closed origin-producer set. 'human' gained a real write site in 2.1.172
+    (resume-background-agent path); before that it was consumer-guard-only.
     """
 
-    kind: Literal['auto-continuation', 'channel', 'coordinator', 'peer', 'task-notification']  # last updated 2.1.161
+    kind: Literal[
+        'auto-continuation', 'channel', 'coordinator', 'human', 'peer', 'task-notification'
+    ]  # last updated 2.1.172
 
 
 class UserRecord(BaseRecord):
@@ -3264,6 +3327,74 @@ class AgentsKilledSystemRecord(BaseRecord):
     entrypoint: str | None = None
 
 
+class ModelRefusalFallbackSystemRecord(BaseRecord):
+    """System record for an API-side model refusal triggering a fallback retry (subtype=model_refusal_fallback).
+
+    Binary ``{type:"system",subtype:"model_refusal_fallback",direction:"retry",content,
+    level:"warning",trigger:"refusal",originalModel,fallbackModel,requestId,
+    apiRefusalCategory,apiRefusalExplanation,retractedMessageUuids?}``. Producer present
+    since ≤2.1.162; surfaced in JSONL by Claude Fable 5 refusal fallbacks (2.1.170+).
+    originalModel/fallbackModel carry config-level ids including the ``[1m]`` context
+    suffix -- plain str, not ModelId.
+    """
+
+    type: Literal['system']
+    cwd: PathField
+    parentUuid: str | None
+    subtype: Literal['model_refusal_fallback']
+    content: str
+    level: Literal['warning']
+    direction: Literal['retry']
+    trigger: Literal['refusal']  # last updated 2.1.172
+    originalModel: str
+    fallbackModel: str
+    requestId: str | None = None  # Passthrough; key absent when the fallback event has no request id
+    apiRefusalCategory: str | None = None
+    apiRefusalExplanation: str | None = None
+    retractedMessageUuids: Sequence[str] | None = None  # Second write site only (refusal-retract path)
+    isMeta: bool
+    isSidechain: bool
+    userType: str
+    version: CCVersionStrField
+    gitBranch: str
+    slug: str | None = None
+    entrypoint: str | None = None
+    agentId: str | None = None
+    teamName: str | None = None
+    agentName: str | None = None
+
+
+class ModelFallbackSystemRecord(BaseRecord):
+    """System record for a model-availability fallback (subtype=model_fallback).
+
+    Binary yields ``{type:"system",subtype:"model_fallback",content:`Switched to ...`,
+    level:"warning",trigger,originalModel,fallbackModel}`` when the configured model is
+    unavailable (the fallbackModel setting); the if-guard restricts trigger to exactly
+    model_not_found | permission_denied. Producer present since ≤2.1.162. No
+    requestId/direction/apiRefusal* -- those belong to ModelRefusalFallbackSystemRecord.
+    """
+
+    type: Literal['system']
+    cwd: PathField
+    parentUuid: str | None
+    subtype: Literal['model_fallback']
+    content: str
+    level: Literal['warning']
+    trigger: Literal['model_not_found', 'permission_denied']  # last updated 2.1.172
+    originalModel: str
+    fallbackModel: str
+    isMeta: bool
+    isSidechain: bool
+    userType: str
+    version: CCVersionStrField
+    gitBranch: str
+    slug: str | None = None
+    entrypoint: str | None = None
+    agentId: str | None = None
+    teamName: str | None = None
+    agentName: str | None = None
+
+
 # Union of system subtype records
 SystemSubtypeRecord = Annotated[
     LocalCommandSystemRecord
@@ -3276,7 +3407,9 @@ SystemSubtypeRecord = Annotated[
     | BridgeStatusSystemRecord
     | ScheduledTaskFireSystemRecord
     | AwaySummarySystemRecord
-    | AgentsKilledSystemRecord,
+    | AgentsKilledSystemRecord
+    | ModelRefusalFallbackSystemRecord
+    | ModelFallbackSystemRecord,
     pydantic.Field(discriminator='subtype'),
 ]
 
@@ -3736,7 +3869,8 @@ class ForkContextRefRecord(StrictModel):
 
 
 # Deferred rT4 routing types (registered but not modeled -- binary-proven gate unmet):
-#   frame-link            -- routing entry only; no producer/construction site exists.
+#   frame-link            -- routing entry only; no producer ever existed, and the routing
+#                            key itself was removed in 2.1.172.
 #   marble-origami-{commit,snapshot,reset} -- dead code (producers present, zero callers
 #                            in 2.1.162/2.1.163; "context-collapse" feature unshipped);
 #                            spread payload unenumerable.
@@ -4257,6 +4391,8 @@ SessionRecord = Annotated[
     | ScheduledTaskFireSystemRecord  # Must be before SystemRecord!
     | AwaySummarySystemRecord  # Must be before SystemRecord!
     | AgentsKilledSystemRecord  # Must be before SystemRecord!
+    | ModelRefusalFallbackSystemRecord  # Must be before SystemRecord!
+    | ModelFallbackSystemRecord  # Must be before SystemRecord!
     | SystemRecord
     | FileHistorySnapshotRecord
     | QueueOperationRecord

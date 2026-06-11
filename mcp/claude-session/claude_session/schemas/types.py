@@ -179,7 +179,9 @@ schemas.operations.archive needs this type, but services imports from schemas.
 # Used for strict validation of the model field in Message and AssistantRecord
 ModelId = Literal[
     '<synthetic>',
+    'claude-fable-5',
     'claude-haiku-4-5-20251001',
+    'claude-mythos-5',
     'claude-opus-4-1-20250805',
     'claude-opus-4-5-20251101',
     'claude-opus-4-6',
@@ -243,6 +245,9 @@ _AllModelIds = Literal[
     'claude-sonnet-4-5@20250929',
     'claude-sonnet-4-6',
     'claude-sonnet-4@20250514',
+    # Claude 5 models
+    'claude-fable-5',
+    'claude-mythos-5',
     # Short aliases (used in Task tool input.model)
     'haiku',
     'sonnet',
