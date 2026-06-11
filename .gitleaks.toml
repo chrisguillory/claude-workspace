@@ -1,0 +1,17 @@
+# gitleaks config — extends the embedded default ruleset (222 rules: token shapes,
+# entropy floors, keyword pre-filters) with this repo's machine-private filename blocks.
+# Wired via pre-commit (id: gitleaks, pinned rev) with --redact: matches are never echoed.
+# Path-only rules fire on the staged path itself — `git add -f` included.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "machine-private-zsh-file"
+description = "Machine-private shell config must never be committed (lives out-of-tree at ~/.config/zsh.local)"
+path = '''(?:^|/)(?:zsh\.local|local\.zsh)$'''
+
+[[rules]]
+id = "machine-private-zsh-history"
+description = "Shell history must never be committed"
+path = '''(?:^|/)\.zsh_history$'''

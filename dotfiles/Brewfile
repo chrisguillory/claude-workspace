@@ -1,0 +1,15 @@
+# Mesh-wide toolchain manifest. install.sh converges each machine to it
+# (missing-only, no upgrades) — adding a line here = everywhere on its next run.
+
+# Shell environment layer (hooked by zsh/.zshrc and .mise.toml)
+brew "direnv"
+brew "mise"
+brew "uv"
+
+# Node.js development
+brew "node"
+brew "pnpm"
+brew "yarn"
+
+# Repo toolchain (pre-commit hooks that need a system binary)
+brew "pinact"

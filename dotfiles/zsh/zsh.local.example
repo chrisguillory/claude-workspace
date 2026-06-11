@@ -1,0 +1,14 @@
+# zsh.local.example — template for ~/.config/zsh.local (machine-private, never committed).
+#
+# The real file lives OUTSIDE the repo — a sibling of the ~/.config/zsh symlink —
+# so no git operation can ever capture it. .zprofile sources it (if present) last,
+# so it can override anything the shared config set.
+#
+#   cp dotfiles/zsh/zsh.local.example ~/.config/zsh.local
+#
+# Per-machine secrets and host-specific env, typically gated on a checkout's presence:
+#
+# if [ -d "$HOME/{work-checkout}" ]; then
+#   export {SERVICE}_TOKEN="..."
+#   export {SERVICE}_EMAIL="you@example.com"
+# fi

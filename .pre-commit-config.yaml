@@ -26,6 +26,17 @@ repos:
         args: [--markdown-linebreak-ext=md, --markdown-linebreak-ext=markdown]
         exclude: '\.(csv|tsv|pyi?)$'  # csv/tsv: legitimate CRLF (RFC 4180); py/pyi: handled by ruff
 
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      # The `gitleaks` (golang) id, NOT `gitleaks-system`: the system variant lacks
+      # pass_filenames: false and fails OPEN at commit time (scans 0 bytes, exits 0).
+      # Scans the staged diff with --redact (matches never echoed). Staged-diff scope
+      # means `pre-commit run --files X` on unstaged files is a no-op for this hook;
+      # a full-tree audit is `gitleaks dir .` directly.
+      - id: gitleaks
+        args: ['--config=.gitleaks.toml']
+
   - repo: local
     hooks:
       - id: exception-safety-linter
