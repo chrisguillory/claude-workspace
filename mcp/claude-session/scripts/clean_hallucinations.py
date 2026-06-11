@@ -51,14 +51,27 @@ error_boundary = ErrorBoundary(exit_code=1)
 RENAMES: Mapping[str, Mapping[str, str]] = {'TaskUpdate': {'id': 'taskId'}}
 
 
-class Finding(ClosedModel):
-    """One fixable-failing record, addressed by the content hash of its line."""
+@error_boundary
+def main() -> None:
+    """Report fixable hallucination records, or ``--fix`` the operator-approved hashes."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('root', nargs='?', default=str(Path.home() / '.claude/projects'))
+    parser.add_argument(
+        '--exclude', action='append', default=[], help='session-id substring to skip (e.g. active session)'
+    )
+    parser.add_argument(
+        '--fix', action='append', default=[], metavar='HASH', help='hash(es) to repair; omit to report only'
+    )
+    parser.add_argument('--backup', default=str(Path.home() / '.claude-workspace/claude-session/cleaned'))
+    args = parser.parse_args()
 
-    hash: str
-    path: Path
-    lineno: int
-    fixes: Sequence[str]
-    fixed_line: str
+    cleaner = Cleaner(Path(args.root), tuple(args.exclude), Path(args.backup))
+    found, residual = cleaner.scan()
+    approved = set(args.fix)
+    if approved:
+        cleaner.repair(found, approved)
+    else:
+        cleaner.report(found, residual)
 
 
 class Cleaner:
@@ -261,27 +274,14 @@ class Cleaner:
         return hashlib.sha256(line.encode()).hexdigest()[:7]
 
 
-@error_boundary
-def main() -> None:
-    """Report fixable hallucination records, or ``--fix`` the operator-approved hashes."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('root', nargs='?', default=str(Path.home() / '.claude/projects'))
-    parser.add_argument(
-        '--exclude', action='append', default=[], help='session-id substring to skip (e.g. active session)'
-    )
-    parser.add_argument(
-        '--fix', action='append', default=[], metavar='HASH', help='hash(es) to repair; omit to report only'
-    )
-    parser.add_argument('--backup', default=str(Path.home() / '.claude-workspace/claude-session/cleaned'))
-    args = parser.parse_args()
+class Finding(ClosedModel):
+    """One fixable-failing record, addressed by the content hash of its line."""
 
-    cleaner = Cleaner(Path(args.root), tuple(args.exclude), Path(args.backup))
-    found, residual = cleaner.scan()
-    approved = set(args.fix)
-    if approved:
-        cleaner.repair(found, approved)
-    else:
-        cleaner.report(found, residual)
+    hash: str
+    path: Path
+    lineno: int
+    fixes: Sequence[str]
+    fixed_line: str
 
 
 if __name__ == '__main__':
