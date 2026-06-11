@@ -30,8 +30,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
-from collections.abc import Iterator, Mapping, Sequence, Set
+from collections.abc import Mapping, Sequence, Set
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, get_args
@@ -64,7 +65,7 @@ class Cleaner:
     """Schema-driven, operator-approved repair of hallucinated tool-args in session JSONL.
 
     A run is configured with a corpus root, session-id excludes, and a backup root.
-    ``findings`` discovers fixable-failing records; ``repair`` rewrites approved hashes. The
+    ``scan`` discovers fixable-failing records; ``repair`` rewrites approved hashes. The
     repair logic itself is stateless (class/static methods): it derives bool/int param types
     from each tool model, with ``RENAMES`` the one field-name mismatch the schema can't derive.
     """
@@ -74,13 +75,22 @@ class Cleaner:
         self.excludes = excludes
         self.backup_root = backup_root
 
-    def findings(self) -> Iterator[Finding]:
-        """Yield a Finding for every record that fails validation but passes after the fix."""
+    def scan(self) -> tuple[Sequence[Finding], int]:
+        """Return (fixable findings, count of failing records the cleaner cannot repair).
+
+        A record is a fixable finding only if it currently fails ``validate_session_record``
+        and passes after the fix. Records the fix touches but that still fail (a different
+        malformed field) are counted as ``residual`` and surfaced, not silently dropped, so
+        the operator never gets a false all-clear. Lines are split on newline only, matching
+        the real validator's read so reported line numbers agree with it.
+        """
+        findings: list[Finding] = []
+        residual = 0
         for path in sorted(self.root.glob('**/*.jsonl')):
             if path.name == 'journal.jsonl' or any(x in path.name for x in self.excludes):
                 continue
             try:
-                lines = path.read_text().splitlines()
+                lines = path.read_text().split('\n')
             except OSError:
                 continue
             for lineno, line in enumerate(lines, 1):
@@ -92,48 +102,73 @@ class Cleaner:
                 except json.JSONDecodeError:
                     continue
                 fixed, fixes = self.fixed_record(record)
-                if fixed is None or self.validates(record) or not self.validates(fixed):
+                if fixed is None or self.validates(record):
                     continue
-                yield Finding(
-                    hash=self.short_hash(stripped),
-                    path=path,
-                    lineno=lineno,
-                    fixes=fixes,
-                    fixed_line=json.dumps(fixed, ensure_ascii=False),
-                )
+                if self.validates(fixed):
+                    findings.append(
+                        Finding(
+                            hash=self.short_hash(stripped),
+                            path=path,
+                            lineno=lineno,
+                            fixes=fixes,
+                            fixed_line=json.dumps(fixed, ensure_ascii=False),
+                        )
+                    )
+                else:
+                    residual += 1
+        return findings, residual
 
     def repair(self, found: Sequence[Finding], approved: Set[str]) -> None:
-        """Rewrite only the approved hashes in place, backing up each touched file first."""
+        """Rewrite only the approved hashes in place, backing up each touched file first.
+
+        Re-reads each file and re-confirms the target line still hashes to the approved hash
+        before writing (content-addressed end-to-end); a line that changed since the scan is
+        skipped and reported, never blindly overwritten. Lines are split/joined on newline
+        only, so untouched records keep their exact bytes.
+        """
         backup_dir = self.backup_root / datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')
-        by_file: dict[Path, dict[int, str]] = {}
+        by_file: dict[Path, list[Finding]] = {}
         for finding in found:
             if finding.hash in approved:
-                by_file.setdefault(finding.path, {})[finding.lineno] = finding.fixed_line
+                by_file.setdefault(finding.path, []).append(finding)
 
         fixed_total = 0
-        for path, replacements in by_file.items():
-            lines = path.read_text().splitlines()
-            for lineno, fixed_line in replacements.items():
-                lines[lineno - 1] = fixed_line
-                fixed_total += 1
-            backup_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, backup_dir / path.name)
-            path.write_text('\n'.join(lines) + '\n')
-            print(f'  {path.name}: {len(replacements)} record(s)')
+        stale = 0
+        for path, file_findings in by_file.items():
+            lines = path.read_text().split('\n')
+            applied = 0
+            for finding in file_findings:
+                idx = finding.lineno - 1
+                if idx >= len(lines) or self.short_hash(lines[idx].strip()) != finding.hash:
+                    stale += 1
+                    continue
+                lines[idx] = finding.fixed_line
+                applied += 1
+            if applied:
+                backup_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, backup_dir / path.name)
+                path.write_text('\n'.join(lines))
+                fixed_total += applied
+                print(f'  {path.name}: {applied} record(s)')
 
         missing = approved - {finding.hash for finding in found}
         if missing:
-            print(
-                f'WARNING: {len(missing)} approved hash(es) not found (file changed, or already fixed): {", ".join(sorted(missing))}'
-            )
+            print(f'WARNING: {len(missing)} approved hash(es) not in the scan: {", ".join(sorted(missing))}')
+        if stale:
+            print(f'WARNING: {stale} record(s) changed since the scan; skipped (re-run report).')
         print(f'fixed {fixed_total} record(s) across {len(by_file)} file(s); backups in {backup_dir}')
 
     @staticmethod
-    def report(found: Sequence[Finding]) -> None:
-        """Print each fixable finding as ``<hash>  <file>:<line>  <fixes>``."""
+    def report(found: Sequence[Finding], residual: int) -> None:
+        """Print each fixable finding, then the count of failing-but-unfixable records."""
         for finding in found:
             print(f'{finding.hash}  {finding.path.name}:{finding.lineno}  {", ".join(finding.fixes)}')
         print(f'\n{len(found)} fixable finding(s). Re-run with --fix <hash> [...] to repair the approved ones.')
+        if residual:
+            print(
+                f'{residual} record(s) fail validation but are not auto-fixable (a different malformed '
+                'field) -- inspect with validate_models.py --errors.'
+            )
 
     @classmethod
     def fixed_record(cls, record: JsonRecord) -> tuple[JsonRecord | None, Sequence[str]]:
@@ -180,7 +215,7 @@ class Cleaner:
             if expected is bool and val in ('true', 'false'):
                 out[key] = val == 'true'
                 fixes.append(f'{key}:"{val}"->bool')
-            elif expected is int and val.lstrip('-').isdigit():
+            elif expected is int and re.fullmatch(r'-?\d+', val, re.ASCII):
                 out[key] = int(val)
                 fixes.append(f'{key}:"{val}"->int')
         return (out, fixes) if fixes else (None, [])
@@ -241,12 +276,12 @@ def main() -> None:
     args = parser.parse_args()
 
     cleaner = Cleaner(Path(args.root), tuple(args.exclude), Path(args.backup))
-    found = list(cleaner.findings())
+    found, residual = cleaner.scan()
     approved = set(args.fix)
     if approved:
         cleaner.repair(found, approved)
     else:
-        cleaner.report(found)
+        cleaner.report(found, residual)
 
 
 if __name__ == '__main__':
