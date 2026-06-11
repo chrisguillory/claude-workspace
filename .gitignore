@@ -23,5 +23,12 @@ target/
 # Auth/session files (sensitive)
 *_auth.json
 *.auth.json
+# Machine-private shell config — the real file lives out-of-tree (~/.config/zsh.local);
+# any-depth belt-and-suspenders against an in-tree habit-drop
+local.zsh
+zsh.local
+
+# brew bundle dropping (debugging artifact, not reproducible-install state)
+Brewfile.lock.json
 
 /.obsidian/
