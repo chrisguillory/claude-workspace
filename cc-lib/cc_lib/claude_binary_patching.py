@@ -182,7 +182,7 @@ Patches (alphabetical by name):
                     (``T?`` → ``K?``), response (``T&&<r>&&`` → ``K&&<r>&&``),
                     and the "(ctrl+o to expand)" hint (``!T&&`` → ``!K&&``); the
                     verbose tree then follows the verbose param directly.
-                    Anchor: ``F8.createElement(esO,{progressMessages:_,tools:q,verbose:K})``
+                    Anchor: ``n8.createElement(y$3,{progressMessages:_,tools:q,verbose:K})``
                     (the verbose-tree React element invocation — interior
                     fragment that's stable across the substitution, so
                     patcher status detection works post-apply).
@@ -221,6 +221,26 @@ Empirical verification on 2.1.128 (2026-05-06)::
       original "Tool use rejected" bug no longer exists
 
 Version Log::
+
+    2.1.172 (2026-06-10)
+        Nine releases since 2.1.163 (2.1.164-172), including Claude Fable 5 at
+        2.1.170. Routine plumbing — no changelog entry touches a live patch, so
+        no obsoletions. Minified identifiers drifted; all four drifted patches
+        re-derived, hook-ask applied clean.
+
+        Patch updates:
+        - force-429-retry-header / force-429-retry-status: re-derived. The
+          isClaudeAISubscriber/isEnterpriseSubscriber identifiers re-minified
+          Lq/PdH → Gq/hrH. 1 site each, applied.
+        - hook-ask-no-override: clean apply (anchor + bytes stable since
+          2.1.109). 1 site.
+        - scratchpad: re-derived. Still two byte-identical gate functions
+          (isScratchpadEnabled / isScratchpadGateEnabled, 2 sites) under the
+          name-independent ``(){return`` anchor; accessor J_ → j_.
+        - show-subagent-prompt-tools-response: re-derived. Full JSX re-map
+          (module F8 → n8, component esO → y$3, plus U6→F6, FV_→DC_, iP_→CR_,
+          ri8→B6q, wn→ii, MTH→k$H, N→V, C2→yW; locals f→J, J→j). Strategy
+          unchanged: 4-site T→K substitution. 1 site.
 
     2.1.163 (2026-06-04)
         Routine bug-fix release (managed version-range settings, /plugin
@@ -635,10 +655,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FIX,
         anchor=b'"x-should-retry"',
-        old=b'_==="true"&&(!Lq()||PdH())',
-        new=b'_==="true"&&(!0/*Lq|PdH*/)',
+        old=b'_==="true"&&(!Gq()||hrH())',
+        new=b'_==="true"&&(!0/*Gq|hrH*/)',
         window=200,
-        min_version=CCVersion('2.1.163'),
+        min_version=CCVersion('2.1.172'),
     ),
     PatchDef(
         name='force-429-retry-status',
@@ -653,10 +673,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FIX,
         anchor=b'"x-should-retry"',
-        old=b'if(H.status===429)return!Lq()||PdH();',
-        new=b'if(H.status===429)return!0;/*Lq|PdH*/',
+        old=b'if(H.status===429)return!Gq()||hrH();',
+        new=b'if(H.status===429)return!0;/*Gq|hrH*/',
         window=600,
-        min_version=CCVersion('2.1.163'),
+        min_version=CCVersion('2.1.172'),
     ),
     PatchDef(
         name='hook-ask-no-override',
@@ -673,36 +693,36 @@ PATCHES: Sequence[PatchDef] = (
         description='Enable session-scoped scratchpad directory with auto-permissions',
         kind=PatchKind.FEATURE,
         anchor=b'(){return',
-        old=b'(){return J_("tengu_scratch",!1)}',
+        old=b'(){return j_("tengu_scratch",!1)}',
         new=b'(){return!0/*scratch always on*/}',
         window=50,
-        min_version=CCVersion('2.1.163'),
+        min_version=CCVersion('2.1.172'),
     ),
     PatchDef(
         name='show-subagent-prompt-tools-response',
         description='Expand completed subagent to show prompt, tool calls, and response when verbose=true',
         kind=PatchKind.VISIBILITY,
-        anchor=b'F8.createElement(esO,{progressMessages:_,tools:q,verbose:K})',
+        anchor=b'n8.createElement(y$3,{progressMessages:_,tools:q,verbose:K})',
         old=(
-            b'!1,T&&f&&F8.createElement(U6,null,F8.createElement(FV_,{prompt:f,theme:O})),'
-            b'T?F8.createElement(iP_,null,F8.createElement(esO,{progressMessages:_,tools:q,verbose:K})):null,'
-            b'T&&J&&J.length>0&&F8.createElement(U6,null,F8.createElement(ri8,{content:J,theme:O})),'
-            b'F8.createElement(U6,{height:1},F8.createElement(wn,{message:X,lookups:MTH,addMargin:!1,tools:q,'
+            b'!1,T&&J&&n8.createElement(F6,null,n8.createElement(DC_,{prompt:J,theme:O})),'
+            b'T?n8.createElement(CR_,null,n8.createElement(y$3,{progressMessages:_,tools:q,verbose:K})):null,'
+            b'T&&j&&j.length>0&&n8.createElement(F6,null,n8.createElement(B6q,{content:j,theme:O})),'
+            b'n8.createElement(F6,{height:1},n8.createElement(ii,{message:X,lookups:k$H,addMargin:!1,tools:q,'
             b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!T&&F8.createElement(N,{dimColor:!0},"  ",F8.createElement(C2,null)))'
+            b'!T&&n8.createElement(V,{dimColor:!0},"  ",n8.createElement(yW,null)))'
         ),
         new=(
-            b'!1,K&&f&&F8.createElement(U6,null,F8.createElement(FV_,{prompt:f,theme:O})),'
-            b'K?F8.createElement(iP_,null,F8.createElement(esO,{progressMessages:_,tools:q,verbose:K})):null,'
-            b'K&&J&&J.length>0&&F8.createElement(U6,null,F8.createElement(ri8,{content:J,theme:O})),'
-            b'F8.createElement(U6,{height:1},F8.createElement(wn,{message:X,lookups:MTH,addMargin:!1,tools:q,'
+            b'!1,K&&J&&n8.createElement(F6,null,n8.createElement(DC_,{prompt:J,theme:O})),'
+            b'K?n8.createElement(CR_,null,n8.createElement(y$3,{progressMessages:_,tools:q,verbose:K})):null,'
+            b'K&&j&&j.length>0&&n8.createElement(F6,null,n8.createElement(B6q,{content:j,theme:O})),'
+            b'n8.createElement(F6,{height:1},n8.createElement(ii,{message:X,lookups:k$H,addMargin:!1,tools:q,'
             b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!K&&F8.createElement(N,{dimColor:!0},"  ",F8.createElement(C2,null)))'
+            b'!K&&n8.createElement(V,{dimColor:!0},"  ",n8.createElement(yW,null)))'
         ),
         window=800,
-        min_version=CCVersion('2.1.163'),
+        min_version=CCVersion('2.1.172'),
     ),
 )
 
