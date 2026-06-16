@@ -555,6 +555,18 @@ def pipeline(
         data = json.loads(sys.stdin.read())
 
     steps = data.get('steps', data) if isinstance(data, dict) else data
+
+    # The CLI uses hyphenated tool names (matching its subcommands); the registry
+    # dispatches by the underscored method name (the MCP-layer contract). Translate
+    # at this boundary so a pipeline step's "tool" accepts the same hyphenated names
+    # as the rest of the CLI — e.g. "wait-for-selector" -> "wait_for_selector".
+    if isinstance(steps, list):
+        steps = [
+            {**step, 'tool': str(step['tool']).replace('-', '_')}
+            if isinstance(step, Mapping) and 'tool' in step
+            else step
+            for step in steps
+        ]
     result = _call_pipeline(steps, on_error=on_error)
 
     if format == 'json':
