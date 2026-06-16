@@ -31,7 +31,9 @@ compactions), the **truth** (merged/open PRs, recent commits, worktrees), and ro
 escape. Launch a single **`general-purpose` agent** (fresh, unbiased context) given the three gathered
 file paths plus the render spec below. Instruct it to ground-truth every check-mark against `truth.txt`
 (and `gh` / `git` where needed), **Write the finished map to the `top.md` path printed above**, and
-return only a one-line confirmation — not the map itself (you'll `cat` it).
+return only a one-line confirmation — not the map itself (you'll `cat` it). Have it then run
+`.claude/skills/where-am-i/validate-map.py {top.md}` and fix every issue until it prints `valid ✓` —
+`example.md` in this directory is a conformant reference of the target shape.
 
 ### Render spec (the agent follows this exactly)
 
@@ -46,7 +48,11 @@ for the sub-quests under each.
 then a prose header line:
 `WHERE AM I — session {id} "{title}" · [{from} → {to}] ~{span} · {n} msgs · {compactions} compactions · {subagents} subagents · most-used: {top skills}`
 followed by one honest "the shape of it" sentence — how a person would narrate the arc to a colleague.
-Frontmatter counts (`roots.total` / `landed` / `open`) must match the rendered tree exactly.
+Frontmatter counts (`roots.total` / `landed` / `open`) must match the rendered tree exactly —
+`roots.landed` equals the number of `✓`-marked roots, and `total = landed + open`. **`session.id` is
+the full session UUID** (the gather prints it) — the artifact's traceable identity back to its
+transcript, not the short prefix the prose header line may abbreviate to. The bundled `validate-map.py`
+enforces this structure and is the post-run conformance gate.
 
 **Check-marks.** `✓` = landed (verified against truth); the **absence** of a mark = open. No other emojis.
 A root is marked `✓` on its own line when its goal landed; it stays unmarked while a sub-quest is open.

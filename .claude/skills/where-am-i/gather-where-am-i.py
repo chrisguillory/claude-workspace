@@ -1,20 +1,11 @@
 #!/usr/bin/env -S uv run --quiet --no-project --script
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.13"
 # dependencies = []
 # ///
-"""Deterministic gather for the `where-am-i` quest-map.
+"""Deterministic gather for the where-am-i quest-map — writes the spine, truth, and meta files.
 
-Resolves the session transcript (a session-id prefix, or — with no arg — the most
-recently active one), then writes the three inputs the map-building agent reads:
-
-    {session-dir}/where-am-i/spine.txt   the user's verbatim messages, in order — the intent spine
-    {session-dir}/where-am-i/truth.txt   merged/open PRs, recent commits, worktrees — ground truth
-    {session-dir}/where-am-i/meta.txt    compactions, subagents launched, most-used skills
-
-Prints the paths + headline stats and the `top.md` path the skill writes the map to.
-Why a spine: the user's own messages are the load-bearing signal of intent; a model summary
-rounds off their exact corrections, the transcript does not.
+The spine is the user's verbatim messages, the load-bearing signal of intent a summary rounds off.
 """
 
 from __future__ import annotations
