@@ -19,7 +19,6 @@ __all__ = [
     'BridgeError',
     'PipelineRequest',
     'PipelineResponse',
-    'PipelineStep',
     'StepResult',
     'ToolRequest',
     'ToolResponse',
@@ -37,7 +36,7 @@ import pydantic
 from cc_lib.schemas.base import ClosedModel
 
 from .service import BrowserService
-from .wire import OnErrorPolicy, PipelineStatus, StepStatus, ToolStatus
+from .wire import OnErrorPolicy, PipelineStatus, PipelineStep, StepStatus, ToolStatus
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +65,6 @@ class ToolResponse(ClosedModel):
     result: Any = None  # strict_typing_linter.py: loose-typing — tool results vary per tool
     elapsed_ms: int = 0
     error: BridgeError | None = None
-
-
-class PipelineStep(ClosedModel):
-    """One step in a pipeline batch."""
-
-    tool: str
-    params: Mapping[str, Any] = {}  # strict_typing_linter.py: loose-typing — tool params vary per tool
 
 
 class PipelineRequest(ClosedModel):

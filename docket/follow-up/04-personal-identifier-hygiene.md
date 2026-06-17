@@ -7,9 +7,10 @@ title: second workplace-email scrub + pin GitHub email surfaces + path scrub
 
 1. **Second history scrub** — workplace-email commits re-drifted onto `origin/main` after the
    first scrub; rewrite them out with the round-1 playbook (method, gotchas, machine/session
-   pointers, backup location: see the operator-private gist named
-   `personal-identifier-hygiene-details` — resolve via `gh gist list`; deliberately not linked
-   here).
+   pointers, backup location: recoverable in full from this session's transcript — the footer's
+   session ID + `/recover-session` or a document-search over it; the notes were written to
+   `scratch/personal-identifier-hygiene-details.md` in-session, so the `Write` survives in the
+   transcript even if that scratch file is later cleaned).
 2. **Root cause, so it can't drift a third time** — invert the misconfigured machine's git
    identity to the settled design (global = personal; `includeIf` scopes the work email to the
    work checkout only), and converge a per-clone noreply via `dotfiles/install.sh`

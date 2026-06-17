@@ -33,7 +33,7 @@ from ..models import (
     WaitForSelectorState,
     WindowSize,
 )
-from ..wire import OnErrorPolicy
+from ..wire import OnErrorPolicy, PipelineStep
 
 logger = logging.getLogger(__name__)
 
@@ -555,6 +555,11 @@ def pipeline(
         data = json.loads(sys.stdin.read())
 
     steps = data.get('steps', data) if isinstance(data, dict) else data
+
+    # Validate the untyped JSON into typed steps at the CLI boundary, then translate
+    # the CLI's hyphenated tool names to the underscored names the registry dispatches by.
+    validated = pydantic.TypeAdapter(list[PipelineStep]).validate_python(steps)
+    steps = [{**s.model_dump(), 'tool': s.tool.replace('-', '_')} for s in validated]
     result = _call_pipeline(steps, on_error=on_error)
 
     if format == 'json':
@@ -667,3 +672,11 @@ def _print_result(result: object, format: str) -> None:
             typer.secho(msg, fg=typer.colors.GREEN)
     elif result is not None:
         typer.echo(str(result))
+
+
+# -- Error handlers --
+
+
+@error_boundary.handler(pydantic.ValidationError)
+def _handle_validation_error(exc: pydantic.ValidationError) -> None:
+    typer.secho(f'Error: {exc}', fg=typer.colors.RED, err=True)
