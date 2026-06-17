@@ -1470,6 +1470,12 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
   const vegaInitScript = `
   <script>
     (function() {
+      function showError(div, e) {
+        var pre = document.createElement('pre');
+        pre.style.color = '#b00020';
+        pre.textContent = 'Vega-Lite error: ' + (e && e.message ? e.message : e);
+        div.replaceChildren(pre);
+      }
       function renderVega() {
         document.querySelectorAll('pre > code.language-vega-lite, pre > code.language-chart').forEach(function(code) {
           var pre = code.parentElement;
@@ -1478,9 +1484,9 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
           pre.replaceWith(div);
           try {
             var spec = JSON.parse(code.textContent);
-            vegaEmbed(div, spec, { actions: true, renderer: 'svg' });
+            vegaEmbed(div, spec, { actions: true, renderer: 'svg' }).catch(function(e) { showError(div, e); });
           } catch (e) {
-            div.innerHTML = '<pre style="color:#b00020">Vega-Lite spec error: ' + (e && e.message) + '</pre>';
+            showError(div, e);
           }
         });
       }
@@ -1492,7 +1498,7 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
   if (hasVegaBlocks && forServe) {
     vegaScripts = `<script src="/vega.min.js"></script><script src="/vega-lite.min.js"></script><script src="/vega-embed.min.js"></script>${vegaInitScript}`;
   } else if (hasVegaBlocks && forStandalone) {
-    vegaScripts = `<script src="https://cdn.jsdelivr.net/npm/vega@5"></script><script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script><script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>${vegaInitScript}`;
+    vegaScripts = `<script src="https://cdn.jsdelivr.net/npm/vega@5/build/vega.min.js"></script><script src="https://cdn.jsdelivr.net/npm/vega-lite@5/build/vega-lite.min.js"></script><script src="https://cdn.jsdelivr.net/npm/vega-embed@6/build/vega-embed.min.js"></script>${vegaInitScript}`;
   }
 
   // Output metadata: timestamp (top-right) and filepath (bottom-left)
