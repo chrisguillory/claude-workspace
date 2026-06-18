@@ -33,6 +33,7 @@ def main() -> None:
     staging = Path(sys.argv[1])
     if not (staging / 'quest-map.md').exists():
         sys.exit(f'nothing to hoist: {staging / "quest-map.md"} not found (did the build run?)')
+    _check_valid(staging / 'quest-map.md')  # don't promote a structurally-broken map into the store
     store = _store_dir(sys.argv[2])
 
     if store.exists():
@@ -56,6 +57,18 @@ def _store_dir(session_id: str) -> Path:
     ).stdout.strip()
     main_repo = Path(common).parent  # parent of the shared .git dir = the main repo root
     return main_repo / 'claude-sessions' / session_id[:8] / 'where-am-i'
+
+
+def _check_valid(quest_map: Path) -> None:
+    validator = Path(__file__).with_name('validate-quest-map.py')
+    result = subprocess.run(
+        ['uv', 'run', '--no-project', '--script', str(validator), str(quest_map)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        sys.exit(f'refusing to hoist a map that fails validation:\n{result.stdout}')
 
 
 def _print_diff(old: Path, new: Path) -> None:

@@ -55,7 +55,8 @@ def validate(path: Path) -> Sequence[str]:
     _, frontmatter, body = text.split('---\n', 2)
 
     issues: list[str] = []
-    matches = (ROOT.match(line) for line in body.splitlines())
+    tree = body.split('\n— ', 1)[0]  # roots live above the overlay/footer "— …" markers, which reuse [N] refs
+    matches = (ROOT.match(line) for line in tree.splitlines())
     root_lines = [m for m in matches if m is not None]
     numbers = [int(m.group(1)) for m in root_lines]
     marked = sum(1 for m in root_lines if m.group(2))
