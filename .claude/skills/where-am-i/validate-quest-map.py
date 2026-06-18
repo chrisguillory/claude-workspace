@@ -12,7 +12,7 @@
 """Structural conformance validator for a where-am-i quest-map — checks shape, not content.
 
 The frontmatter is a `ClosedModel`; the body cross-checks (counts vs the tree, numbering, header,
-arrows, footer) are the rest. The post-run gate, and the CI check against the committed example.
+arrows, footer) are the rest. The post-run gate, exercised in CI against a synthetic conformant map.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ UUID = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 def main() -> None:
     if len(sys.argv) != 2:
-        sys.exit('usage: validate-map.py <top.md>')
+        sys.exit('usage: validate-quest-map.py <quest-map.md>')
     issues = validate(Path(sys.argv[1]))
     if issues:
         print(f'INVALID — {len(issues)} issue(s):')

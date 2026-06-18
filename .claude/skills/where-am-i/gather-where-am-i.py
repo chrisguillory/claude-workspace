@@ -3,9 +3,9 @@
 # requires-python = ">=3.13"
 # dependencies = []
 # ///
-"""Deterministic gather for the where-am-i quest-map — writes the spine, truth, and meta files.
+"""Deterministic gather for the where-am-i quest-map: the user-intent spine, the gh ground truth, and session metadata.
 
-The spine is the user's verbatim messages, the load-bearing signal of intent a summary rounds off.
+The spine is the user's verbatim messages — the load-bearing signal of intent a summary rounds off.
 """
 
 from __future__ import annotations
@@ -32,16 +32,18 @@ def main() -> None:
     transcript = _resolve(sys.argv[1] if len(sys.argv) > 1 else None)
     out = transcript.with_suffix('') / 'where-am-i'
     out.mkdir(parents=True, exist_ok=True)
+    since = _session_start(transcript)
 
-    n_msgs = _write_spine(transcript, out / 'spine.txt')
-    _write_truth(out / 'truth.txt')
-    headline = _write_meta(transcript, out / 'meta.txt')
+    n_msgs = _write_spine(transcript, out / 'user-intent-spine.txt')
+    _write_truth(out / 'gh-ground-truth.txt', since)
+    headline = _write_meta(transcript, out / 'session-metadata.txt')
 
     print(f'session:    {transcript.stem}')
-    print(f'spine:      {out / "spine.txt"}   ({n_msgs} user messages)')
-    print(f'truth:      {out / "truth.txt"}')
-    print(f'meta:       {out / "meta.txt"}   ({headline})')
-    print(f'WRITE MAP:  {out / "top.md"}   (per-node detail later under {out / "nodes"}/)')
+    print(f'spine:      {out / "user-intent-spine.txt"}   ({n_msgs} user messages)')
+    print(f'truth:      {out / "gh-ground-truth.txt"}   (PRs merged since {since})')
+    print(f'meta:       {out / "session-metadata.txt"}   ({headline})')
+    print(f'OUTPUT DIR: {out}')
+    print('  the build workflow takes this dir as gatherDir and writes quest-map.md + nodes/ here')
 
 
 def _resolve(arg: str | None) -> Path:
@@ -54,6 +56,15 @@ def _resolve(arg: str | None) -> Path:
     if not candidates:
         sys.exit(f'no transcripts found under {PROJECTS}')
     return max(candidates, key=lambda p: p.stat().st_mtime)  # the actively-written one = current session
+
+
+def _session_start(transcript: Path) -> str:
+    """The earliest transcript timestamp as a Pacific YYYY-MM-DD — the lower bound for the PR window."""
+    for record in _records(transcript):
+        raw = record.get('timestamp', '')
+        if raw:
+            return f'{datetime.fromisoformat(raw).astimezone(PACIFIC):%Y-%m-%d}'
+    sys.exit('could not determine session start: no timestamps in transcript')
 
 
 def _records(path: Path):
@@ -90,15 +101,30 @@ def _write_spine(transcript: Path, dst: Path) -> int:
     return n
 
 
-def _write_truth(dst: Path) -> None:
+def _write_truth(dst: Path, since: str) -> None:
+    """The git/GitHub ground truth, with merged PRs windowed to the session span.
+
+    Windowing to `merged:>=since` makes the bound the session's own span, not an arbitrary count; a fetch
+    that hits the cap fails loud rather than silently truncating — the failure mode that once mislabeled
+    older roots when --limit cut them off.
+    """
+    cap = 500  # safety backstop well above one session's PR count — the guard below makes a hit loud, not silent
+
     def sh(cmd: str) -> str:
-        return subprocess.run(cmd, shell=True, capture_output=True, text=True, check=False).stdout
+        return subprocess.run(cmd, shell=True, capture_output=True, text=True, check=True).stdout
+
+    merged = json.loads(
+        sh(f'gh pr list --search "is:merged merged:>={since}" --limit {cap} --json number,title,mergedAt')
+    )
+    if len(merged) >= cap:
+        sys.exit(f'ground truth truncated: gh returned {len(merged)} merged PRs at the --limit {cap} cap — raise it')
+    merged_lines = '\n'.join(f'#{pr["number"]} [{pr["mergedAt"][:10]}] {pr["title"]}' for pr in merged)
 
     blocks = [
-        '## MERGED PRs',
-        sh('gh pr list --state merged --limit 40 --json number,title --jq \'.[]|"#\\(.number) \\(.title)"\''),
+        f'## MERGED PRs (session window — merged since {since})',
+        merged_lines,
         '\n## OPEN PRs',
-        sh('gh pr list --state open --json number,title --jq \'.[]|"#\\(.number) \\(.title)"\''),
+        sh('gh pr list --state open --limit 200 --json number,title --jq \'.[]|"#\\(.number) \\(.title)"\''),
         '\n## recent origin/main',
         sh('git log --oneline -20 origin/main'),
         '\n## worktrees',

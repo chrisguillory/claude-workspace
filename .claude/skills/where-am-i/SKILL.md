@@ -20,20 +20,37 @@ so the session reaches its context ceiling slower).
 
 !`.claude/skills/where-am-i/gather-where-am-i.py $ARGUMENTS`
 
-The gather wrote three inputs (paths above): the **spine** (the user's verbatim messages — the
-load-bearing record of intent, which a model summary rounds off and the native recap loses across
-compactions), the **truth** (merged/open PRs, recent commits, worktrees), and rough **meta**
-(compactions, subagents, most-used skills).
+The gather wrote three inputs (paths above): **`user-intent-spine.txt`** (the user's verbatim messages —
+the load-bearing record of intent, which a model summary rounds off and the native recap loses across
+compactions), **`gh-ground-truth.txt`** (PRs merged in the session window + open, recent commits,
+worktrees), and **`session-metadata.txt`** (compactions, subagents, most-used skills).
 
-## Build it — launch ONE unbiased agent
+## Build it — run the build workflow
 
 **Do not build the map from your own working memory** — that drift is exactly what this skill exists to
-escape. Launch a single **`general-purpose` agent** (fresh, unbiased context) given the three gathered
-file paths plus the render spec below. Instruct it to ground-truth every check-mark against `truth.txt`
-(and `gh` / `git` where needed), **Write the finished map to the `top.md` path printed above**, and
-return only a one-line confirmation — not the map itself (you'll `cat` it). Have it then run
-`.claude/skills/where-am-i/validate-map.py {top.md}` and fix every issue until it prints `valid ✓` —
-`example.md` in this directory is a conformant reference of the target shape.
+escape. The build is a committed **Workflow** (`build-map.js` here) so its control flow runs the same way
+every time and resumes cleanly if an agent dies mid-run. Invoke it with the gather's output dir:
+
+```
+Workflow({ scriptPath: '.claude/skills/where-am-i/build-where-am-i.js', args: { gatherDir: '{dir}' } })
+```
+
+`{dir}` is the `OUTPUT DIR` the gather printed — it holds `user-intent-spine.txt` / `gh-ground-truth.txt`
+/ `session-metadata.txt` and receives `quest-map.md` + `nodes/`. The workflow runs **roots → nodes → top**,
+deliberately in that order so the map is a roll-up of ground-truthed nodes, never a frozen first guess:
+
+1. **Roots** — one agent reads the spine and returns the user-driven thread list. Pure intent, no
+   ground-truthing yet; it's the only thing that must exist before the fan-out.
+2. **Nodes** (parallel) — one agent per root authoritatively ground-truths it (spine + truth + `git log`
+   directly, *not* a broad guess), writes `nodes/{slug}.md`, and returns its facts (landed?, PRs, span).
+3. **Quest-map** — assembled *last* from those node facts + `session-metadata.txt`, then self-validated
+   against `validate-quest-map.py` until `valid ✓`. The structural validator can't catch a wrong PR label, so
+   the nodes are the semantic check — that's why they run first.
+
+The heavy gathering happens in those throwaway build contexts, so the *main* session never loads it; later,
+opening a node is a `cat`, not a recompute. If a run dies (an overload mid-fan-out), resume it — finished
+agents return from cache, only the tail re-runs. The map and its nodes are machine-local artifacts — full
+fidelity, never committed.
 
 ### Render spec (the agent follows this exactly)
 
@@ -51,7 +68,7 @@ followed by one honest "the shape of it" sentence — how a person would narrate
 Frontmatter counts (`roots.total` / `landed` / `open`) must match the rendered tree exactly —
 `roots.landed` equals the number of `✓`-marked roots, and `total = landed + open`. **`session.id` is
 the full session UUID** (the gather prints it) — the artifact's traceable identity back to its
-transcript, not the short prefix the prose header line may abbreviate to. The bundled `validate-map.py`
+transcript, not the short prefix the prose header line may abbreviate to. The bundled `validate-quest-map.py`
 enforces this structure and is the post-run conformance gate.
 
 **Check-marks.** `✓` = landed (verified against truth); the **absence** of a mark = open. No other emojis.
@@ -77,11 +94,11 @@ oldest-first by their start date.
 
 **Conventions.** Arrows are `→` / `←`, never ASCII `->`. File paths use `{squiggly}` braces, never
 `<angle>` (angle brackets are for CLI help text only). Plain ASCII tree, glanceable in seconds. Top
-level only — no inlined per-node detail.
+level only — the per-node detail lives in `nodes/{slug}.md`, never inlined here.
 
 ## Present
 
-`cat` the written `top.md` and show it verbatim. **It IS the artifact** — do not regenerate, summarize,
-or paraphrase it; you and the user read the same file. When the user picks a thread to act on, page in
-just that node — a targeted spine / transcript search for its slug — rather than reloading the whole
-session.
+`cat` the written `quest-map.md` and show it verbatim. **It IS the artifact** — do not regenerate, summarize,
+or paraphrase it; you and the user read the same file. When the user picks a thread to act on,
+**`cat` its pre-gathered `nodes/{slug}.md`** — the detail was computed once at build time, so paging it
+in is a file read, not a re-search, and the rest of the session stays out of context.

@@ -7,6 +7,9 @@ __pycache__/
 *.pyc
 scratch/
 target/
+
+# per-session artifact store (machine-local)
+/claude-sessions/
 *.so
 
 # CI caches (mypy incremental; xdist per-worker test scratch)
