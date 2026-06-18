@@ -13,8 +13,8 @@ allowed-tools:
 A long session drifts: threads open, sub-quests get pushed and never popped, compactions blur the arc.
 This builds a **shared map both you and the user read** to decide what's next — *what the user drove,
 and how far each thread got*. Intent is the tree; commits and PRs are delivery laid over it. Light at
-the top; **full detail is one `cat` away** (progressive disclosure — completed threads aren't reloaded,
-so the session reaches its context ceiling slower).
+the top; **full detail is one `cat` away** (progressive disclosure — completed threads needn't be
+reloaded, so the session tends to reach its context ceiling slower).
 
 ## Gathered (deterministic)
 
@@ -47,8 +47,8 @@ deliberately in that order so the map is a roll-up of ground-truthed nodes, neve
    against `validate-quest-map.py` until `valid ✓`. The structural validator can't catch a wrong PR label, so
    the nodes are the semantic check — that's why they run first.
 
-The heavy gathering happens in those throwaway build contexts, so the *main* session never loads it; later,
-opening a node is a `cat`, not a recompute. If a run dies (an overload mid-fan-out), resume it — finished
+The heavy gathering happens in those throwaway build contexts, so the *main* session needn't carry the bulk; later,
+opening a node is a `cat` you choose to make, not a recompute. If a run dies (an overload mid-fan-out), resume it — finished
 agents return from cache, only the tail re-runs. The map and its nodes are machine-local artifacts — full
 fidelity, never committed.
 
@@ -101,4 +101,4 @@ level only — the per-node detail lives in `nodes/{slug}.md`, never inlined her
 `cat` the written `quest-map.md` and show it verbatim. **It IS the artifact** — do not regenerate, summarize,
 or paraphrase it; you and the user read the same file. When the user picks a thread to act on,
 **`cat` its pre-gathered `nodes/{slug}.md`** — the detail was computed once at build time, so paging it
-in is a file read, not a re-search, and the rest of the session stays out of context.
+in is a file read, not a re-search, and you page in just that node, not the rest of the session.
