@@ -143,19 +143,19 @@ Patches (alphabetical by name):
                     permissions for reading and writing. Claude uses this
                     instead of ``/tmp`` for intermediate files.
                     Statsig gate ``tengu_scratch``, default false.
-                    ``isScratchpadEnabled`` and ``isScratchpadGateEnabled`` are
-                    emitted as two separate functions with byte-identical bodies
-                    (``(){return <accessor>("tengu_scratch",!1)}``) but distinct
-                    minified names, so the patch keys on the name-independent
-                    body and hits both (2 sites). Each body is short-circuited to
-                    ``return!0`` (plus a length-padding comment); a plain
-                    gate-flip (``!1`` → ``!0``) is defeated by
+                    Under the Bun 1.4 rebuild (2.1.181) the gate is a single
+                    function — ``if(<accessor>("tengu_scratch",!1))return!0;`` with
+                    an ``isArtifactToolEnabled`` fallback (previously two
+                    byte-identical gate functions). The patch neutralizes just the
+                    gate condition (``<accessor>("tengu_scratch",!1)`` → ``!0`` plus
+                    a length-padding comment) so the function returns true
+                    immediately. A plain gate-flip (``!1`` → ``!0``) is defeated by
                     ``cachedGrowthBookFeatures`` in ``~/.claude.json``
-                    (``tengu_scratch: false`` resolves before the patched
-                    default).
-                    Anchor: ``(){return`` — the accessor call is destroyed by the
-                    patch, so it can't anchor detection; the surviving body
-                    prefix does.
+                    (``tengu_scratch: false`` resolves before the patched default),
+                    hence the short-circuit.
+                    Anchor: ``isArtifactToolEnabled`` — the adjacent stable property
+                    name in the fallback branch; the ``tengu_scratch`` call is
+                    destroyed by the patch so it can't anchor detection.
                     Flag introduced in 2.1.45 (last absent: 2.1.44).
 
     show-subagent-prompt-tools-response
@@ -176,19 +176,20 @@ Patches (alphabetical by name):
 
                     Tool calls appear as one-line summaries (tool name + args),
                     not full input/output.
-                    Substitutes the four standalone ``T`` (isTranscriptMode)
-                    usages in the subagent-row JSX body with ``K`` (the verbose
-                    param): prompt (``T&&<p>&&`` → ``K&&<p>&&``), tools
-                    (``T?`` → ``K?``), response (``T&&<r>&&`` → ``K&&<r>&&``),
-                    and the "(ctrl+o to expand)" hint (``!T&&`` → ``!K&&``); the
-                    verbose tree then follows the verbose param directly.
-                    Anchor: ``n8.createElement(y$3,{progressMessages:_,tools:q,verbose:K})``
+                    Substitutes the four standalone transcript-mode-flag usages in
+                    the subagent-row JSX body with the verbose param — prompt
+                    (``{flag}&&{prompt}&&`` → ``{verbose}&&{prompt}&&``), tools
+                    (``{flag}?`` → ``{verbose}?``), response
+                    (``{flag}&&{resp}&&`` → ``{verbose}&&{resp}&&``), and the
+                    "(ctrl+o to expand)" hint (``!{flag}&&`` → ``!{verbose}&&``);
+                    the verbose tree then follows the verbose param directly.
+                    Anchor: ``eo.createElement(wbp,{progressMessages:t,tools:n,verbose:r})``
                     (the verbose-tree React element invocation — interior
                     fragment that's stable across the substitution, so
                     patcher status detection works post-apply).
                     Strategy history: ``let T=H`` reassignment (pre-2.1.114),
                     destructured-param default flip ``T=!1`` → ``T=K``
-                    (2.1.114..2.1.125), body T→K substitution (2.1.126+).
+                    (2.1.114..2.1.125), body flag→verbose substitution (2.1.126+).
                     https://github.com/anthropics/claude-code/issues/14511
                     https://github.com/anthropics/claude-code/issues/5974
 
@@ -221,6 +222,29 @@ Empirical verification on 2.1.128 (2026-05-06)::
       original "Tool use rejected" bug no longer exists
 
 Version Log::
+
+    2.1.181 (2026-06-18)
+        Eight releases since 2.1.172 (2.1.173-181). The 2.1.181 build upgraded the
+        bundled Bun runtime to 1.4, re-minifying with a new lowercase scheme
+        (locals t/e/n/r; binary shrank 223→215 MB). No changelog entry touches a
+        live patch — no obsoletions.
+
+        Patch updates:
+        - force-429-retry-header / force-429-retry-status: re-derived. Subscriber-
+          gate identifiers re-minified Gq/hrH → Co/oXe; the header var (_→t) and
+          status param (H→e) also changed. 1 site each, applied.
+        - hook-ask-no-override: clean apply (anchor + bytes stable since 2.1.109).
+          1 site.
+        - scratchpad: re-derived + re-anchored. Bun 1.4 consolidated the two gate
+          functions into one (if(<acc>("tengu_scratch",!1))return!0; with an
+          isArtifactToolEnabled fallback), so the name-independent body anchor is
+          gone. Now anchors on the adjacent stable property isArtifactToolEnabled
+          and neutralizes just the gate condition (<acc>("tengu_scratch",!1) → !0
+          + comment). 1 site.
+        - show-subagent-prompt-tools-response: re-derived. Full JSX re-map under
+          the new minifier (module n8→eo, component y$3→wbp, plus others); the
+          leading !1, placeholder child is gone. Control flag T→s, verbose param
+          K→r; strategy unchanged (4-site flag→verbose). 1 site.
 
     2.1.172 (2026-06-10)
         Nine releases since 2.1.163 (2.1.164-172), including Claude Fable 5 at
@@ -655,10 +679,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FIX,
         anchor=b'"x-should-retry"',
-        old=b'_==="true"&&(!Gq()||hrH())',
-        new=b'_==="true"&&(!0/*Gq|hrH*/)',
+        old=b't==="true"&&(!Co()||oXe())',
+        new=b't==="true"&&(!0/*Co|oXe*/)',
         window=200,
-        min_version=CCVersion('2.1.172'),
+        min_version=CCVersion('2.1.181'),
     ),
     PatchDef(
         name='force-429-retry-status',
@@ -673,10 +697,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FIX,
         anchor=b'"x-should-retry"',
-        old=b'if(H.status===429)return!Gq()||hrH();',
-        new=b'if(H.status===429)return!0;/*Gq|hrH*/',
+        old=b'if(e.status===429)return!Co()||oXe();',
+        new=b'if(e.status===429)return!0;/*Co|oXe*/',
         window=600,
-        min_version=CCVersion('2.1.172'),
+        min_version=CCVersion('2.1.181'),
     ),
     PatchDef(
         name='hook-ask-no-override',
@@ -692,37 +716,37 @@ PATCHES: Sequence[PatchDef] = (
         name='scratchpad',
         description='Enable session-scoped scratchpad directory with auto-permissions',
         kind=PatchKind.FEATURE,
-        anchor=b'(){return',
-        old=b'(){return j_("tengu_scratch",!1)}',
-        new=b'(){return!0/*scratch always on*/}',
-        window=50,
-        min_version=CCVersion('2.1.172'),
+        anchor=b'isArtifactToolEnabled',
+        old=b'ut("tengu_scratch",!1)',
+        new=b'!0/*scratch_force_on*/',
+        window=80,
+        min_version=CCVersion('2.1.181'),
     ),
     PatchDef(
         name='show-subagent-prompt-tools-response',
         description='Expand completed subagent to show prompt, tool calls, and response when verbose=true',
         kind=PatchKind.VISIBILITY,
-        anchor=b'n8.createElement(y$3,{progressMessages:_,tools:q,verbose:K})',
+        anchor=b'eo.createElement(wbp,{progressMessages:t,tools:n,verbose:r})',
         old=(
-            b'!1,T&&J&&n8.createElement(F6,null,n8.createElement(DC_,{prompt:J,theme:O})),'
-            b'T?n8.createElement(CR_,null,n8.createElement(y$3,{progressMessages:_,tools:q,verbose:K})):null,'
-            b'T&&j&&j.length>0&&n8.createElement(F6,null,n8.createElement(B6q,{content:j,theme:O})),'
-            b'n8.createElement(F6,{height:1},n8.createElement(ii,{message:X,lookups:k$H,addMargin:!1,tools:q,'
-            b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
+            b's&&p&&eo.createElement(qn,null,eo.createElement(X2t,{prompt:p,theme:o})),'
+            b's?eo.createElement(LOt,null,eo.createElement(wbp,{progressMessages:t,tools:n,verbose:r})):null,'
+            b's&&d&&d.length>0&&eo.createElement(qn,null,eo.createElement(jio,{content:d,theme:o})),'
+            b'eo.createElement(qn,{height:1},eo.createElement(xY,{message:A,lookups:Vge,addMargin:!1,tools:n,'
+            b'commands:[],verbose:r,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!T&&n8.createElement(V,{dimColor:!0},"  ",n8.createElement(yW,null)))'
+            b'!s&&eo.createElement(w,{dimColor:!0},"  ",eo.createElement(ix,null)))'
         ),
         new=(
-            b'!1,K&&J&&n8.createElement(F6,null,n8.createElement(DC_,{prompt:J,theme:O})),'
-            b'K?n8.createElement(CR_,null,n8.createElement(y$3,{progressMessages:_,tools:q,verbose:K})):null,'
-            b'K&&j&&j.length>0&&n8.createElement(F6,null,n8.createElement(B6q,{content:j,theme:O})),'
-            b'n8.createElement(F6,{height:1},n8.createElement(ii,{message:X,lookups:k$H,addMargin:!1,tools:q,'
-            b'commands:[],verbose:K,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
+            b'r&&p&&eo.createElement(qn,null,eo.createElement(X2t,{prompt:p,theme:o})),'
+            b'r?eo.createElement(LOt,null,eo.createElement(wbp,{progressMessages:t,tools:n,verbose:r})):null,'
+            b'r&&d&&d.length>0&&eo.createElement(qn,null,eo.createElement(jio,{content:d,theme:o})),'
+            b'eo.createElement(qn,{height:1},eo.createElement(xY,{message:A,lookups:Vge,addMargin:!1,tools:n,'
+            b'commands:[],verbose:r,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!K&&n8.createElement(V,{dimColor:!0},"  ",n8.createElement(yW,null)))'
+            b'!r&&eo.createElement(w,{dimColor:!0},"  ",eo.createElement(ix,null)))'
         ),
         window=800,
-        min_version=CCVersion('2.1.172'),
+        min_version=CCVersion('2.1.181'),
     ),
 )
 
