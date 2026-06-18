@@ -6,6 +6,7 @@ user-invocable: true
 disable-model-invocation: true
 allowed-tools:
   - "Bash(.claude/skills/where-am-i/gather-where-am-i.py:*)"
+  - "Bash(.claude/skills/where-am-i/hoist-where-am-i.py:*)"
 ---
 
 # Where Am I — orient a long session as a quest-map
@@ -28,14 +29,14 @@ worktrees), and **`session-metadata.txt`** (compactions, subagents, most-used sk
 ## Build it — run the build workflow
 
 **Do not build the map from your own working memory** — that drift is exactly what this skill exists to
-escape. The build is a committed **Workflow** (`build-map.js` here) so its control flow runs the same way
-every time and resumes cleanly if an agent dies mid-run. Invoke it with the gather's output dir:
+escape. The build is a committed **Workflow** (`build-where-am-i.js` here) so its control flow runs the same way
+every time and resumes cleanly if an agent dies mid-run. Invoke it with the gather's staging dir:
 
 ```
 Workflow({ scriptPath: '.claude/skills/where-am-i/build-where-am-i.js', args: { gatherDir: '{dir}' } })
 ```
 
-`{dir}` is the `OUTPUT DIR` the gather printed — it holds `user-intent-spine.txt` / `gh-ground-truth.txt`
+`{dir}` is the `STAGING DIR` the gather printed (an ephemeral temp dir) — it holds `user-intent-spine.txt` / `gh-ground-truth.txt`
 / `session-metadata.txt` and receives `quest-map.md` + `nodes/`. The workflow runs **roots → nodes → top**,
 deliberately in that order so the map is a roll-up of ground-truthed nodes, never a frozen first guess:
 
@@ -96,9 +97,23 @@ oldest-first by their start date.
 `<angle>` (angle brackets are for CLI help text only). Plain ASCII tree, glanceable in seconds. Top
 level only — the per-node detail lives in `nodes/{slug}.md`, never inlined here.
 
+## Hoist — promote to the browsable store
+
+The build wrote to an **ephemeral staging dir** (off `~/.claude` — skills don't litter Anthropic's session
+dir). Promote it to the long-lived, gitignored, browsable store, passing the staging dir + session id the
+gather printed:
+
+```
+.claude/skills/where-am-i/hoist-where-am-i.py {staging-dir} {session-id}
+```
+
+It resolves `{main-repo}/claude-sessions/{id8}/where-am-i/`, **diffs** any existing copy (a re-run surfaces
+what changed — nodes added/removed — instead of silently overwriting), backs the prior up as
+`where-am-i.prev`, then atomically swaps the new copy in. It prints the store path you'll `cat` next.
+
 ## Present
 
-`cat` the written `quest-map.md` and show it verbatim. **It IS the artifact** — do not regenerate, summarize,
+`cat` the hoisted `quest-map.md` (the store path the hoist printed) and show it verbatim. **It IS the artifact** — do not regenerate, summarize,
 or paraphrase it; you and the user read the same file. When the user picks a thread to act on,
 **`cat` its pre-gathered `nodes/{slug}.md`** — the detail was computed once at build time, so paging it
 in is a file read, not a re-search, and you page in just that node, not the rest of the session.

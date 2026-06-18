@@ -2,12 +2,12 @@
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
-#     "cc_lib",
+#     "cc-lib",
 #     "pyyaml",
 # ]
 #
 # [tool.uv.sources]
-# cc_lib = { path = "../../../cc-lib/", editable = true }
+# cc-lib = { path = "../../../cc-lib/", editable = true }
 # ///
 """Structural conformance validator for a where-am-i quest-map — checks shape, not content.
 
@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
+from cc_lib import ErrorBoundary
 from cc_lib.schemas.base import ClosedModel
 from pydantic import Field, ValidationError, model_validator
 
@@ -34,6 +35,7 @@ FOOTER = '— open parent quests never popped back up to —'
 UUID = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
 
+@ErrorBoundary(exit_code=1)
 def main() -> None:
     if len(sys.argv) != 2:
         sys.exit('usage: validate-quest-map.py <quest-map.md>')
@@ -67,14 +69,14 @@ def validate(path: Path) -> Sequence[str]:
         issues.append(f'missing dangling-frame footer: {FOOTER!r}')
 
     try:
-        meta = QuestMapMeta.model_validate(yaml.safe_load(frontmatter))
+        quest_meta = QuestMapMeta.model_validate(yaml.safe_load(frontmatter))
     except ValidationError as exc:
         issues += [f'frontmatter {".".join(map(str, e["loc"]))}: {e["msg"]}' for e in exc.errors()]
     else:
-        if meta.roots.total != len(root_lines):
-            issues.append(f'roots.total ({meta.roots.total}) != numbered roots in tree ({len(root_lines)})')
-        if meta.roots.landed != marked:
-            issues.append(f'roots.landed ({meta.roots.landed}) != ✓-marked roots ({marked})')
+        if quest_meta.roots.total != len(root_lines):
+            issues.append(f'roots.total ({quest_meta.roots.total}) != numbered roots in tree ({len(root_lines)})')
+        if quest_meta.roots.landed != marked:
+            issues.append(f'roots.landed ({quest_meta.roots.landed}) != ✓-marked roots ({marked})')
     return issues
 
 

@@ -1,7 +1,12 @@
 #!/usr/bin/env -S uv run --quiet --no-project --script
 # /// script
 # requires-python = ">=3.13"
-# dependencies = []
+# dependencies = [
+#     "cc-lib",
+# ]
+#
+# [tool.uv.sources]
+# cc-lib = { path = "../../../cc-lib/", editable = true }
 # ///
 """Deterministic gather for the where-am-i quest-map: the user-intent spine, the gh ground truth, and session metadata.
 
@@ -14,9 +19,12 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+from cc_lib import ErrorBoundary
 
 PACIFIC = ZoneInfo('America/Los_Angeles')
 PROJECTS = Path.home() / '.claude' / 'projects'
@@ -28,10 +36,10 @@ SKIP = (
 )
 
 
+@ErrorBoundary(exit_code=1)
 def main() -> None:
     transcript = _resolve(sys.argv[1] if len(sys.argv) > 1 else None)
-    out = transcript.with_suffix('') / 'where-am-i'
-    out.mkdir(parents=True, exist_ok=True)
+    out = Path(tempfile.mkdtemp(prefix='where-am-i-'))  # ephemeral staging; hoist promotes to the store
     since = _session_start(transcript)
 
     n_msgs = _write_spine(transcript, out / 'user-intent-spine.txt')
@@ -42,8 +50,10 @@ def main() -> None:
     print(f'spine:      {out / "user-intent-spine.txt"}   ({n_msgs} user messages)')
     print(f'truth:      {out / "gh-ground-truth.txt"}   (PRs merged since {since})')
     print(f'meta:       {out / "session-metadata.txt"}   ({headline})')
-    print(f'OUTPUT DIR: {out}')
-    print('  the build workflow takes this dir as gatherDir and writes quest-map.md + nodes/ here')
+    print(f'STAGING DIR: {out}')
+    print(
+        '  ephemeral — the build writes quest-map.md + nodes/ here; hoist-where-am-i.py then promotes to claude-sessions/'
+    )
 
 
 def _resolve(arg: str | None) -> Path:
