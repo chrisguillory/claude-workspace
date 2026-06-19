@@ -30,7 +30,7 @@ pass through unparsed. Flags (`--type`, `--glob`, `--all`, `--agent`,
 The companion script:
 - Enumerates files via `rg --files` under the required scope (`--type`, `--glob`, or `--all`)
 - Estimates tokens (bytes ÷ 4)
-- Greedy bin-packs into balanced slices (~120K tokens each, default cap 8)
+- Greedy bin-packs into balanced slices (~400K tokens each, default cap 8)
 - Writes `brief.md` and `slice-N.txt` to the session scratchpad
 - Prints plan summary: file count, total tokens, slice distribution, scratchpad path
 
@@ -58,6 +58,6 @@ shape the task asked for.
 - **Scope**: required — `--type`, `--glob`, or `--all`.
 - **Agent type**: `general-purpose` (override `--agent <type>`).
 - **Execution mode**: synchronous (override `--background`).
-- **Per-agent budget**: ~120K source tokens.
-- **Agent count**: `ceil(total_tokens / 120_000)`, capped at 8.
+- **Per-agent budget**: ~400K source tokens.
+- **Agent count**: `ceil(total_tokens / 400_000)`, capped at 8.
 - **Output format**: dictated by the task. The skill imposes none.
