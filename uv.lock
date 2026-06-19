@@ -526,7 +526,7 @@ wheels = [
 
 [[package]]
 name = "document-search"
-version = "0.11.0"
+version = "0.11.1"
 source = { editable = "mcp/document-search" }
 dependencies = [
     { name = "bm25-rs" },
