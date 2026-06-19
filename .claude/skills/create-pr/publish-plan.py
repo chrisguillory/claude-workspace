@@ -46,7 +46,19 @@ def main() -> None:
 
 def _publish(plan: Path, gist_id: str | None) -> tuple[str, str]:
     """Run markdown-kit (update if we have an id, else create). Returns (view_url, gist_id)."""
-    cmd = ['node', str(MARKDOWN_KIT), str(plan), '--secret-gist', '--embed-images', '--no-show-filepath']
+    # mise pins node 22 for markdown-kit's ESM regardless of the caller repo's asdf/node version
+    cmd = [
+        'mise',
+        'exec',
+        'node@22',
+        '--',
+        'node',
+        str(MARKDOWN_KIT),
+        str(plan),
+        '--secret-gist',
+        '--embed-images',
+        '--no-show-filepath',
+    ]
     if gist_id is not None:
         cmd += ['--gist-id', gist_id]
     out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout

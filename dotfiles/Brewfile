@@ -11,5 +11,17 @@ brew "node"
 brew "pnpm"
 brew "yarn"
 
+# Developer toolchain
+brew "gh"
+brew "ripgrep"
+brew "tmux"
+
 # Repo toolchain (pre-commit hooks that need a system binary)
 brew "pinact"
+
+# MCP-server runtime deps
+brew "snappy"           # selenium-browser: dfindexeddb's snappy C library
+brew "tesseract"        # document-search: PDF OCR
+cask "chromium"         # selenium-browser default browser
+cask "docker-desktop"   # document-search: Qdrant + Redis (compose)
+cask "mitmproxy"        # selenium-browser proxy; claude-session traffic capture (migrated core→cask)

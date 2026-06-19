@@ -123,6 +123,7 @@ const DEFAULTS = {
   host: 'localhost',
   'toc-nav': '',
   html: false,
+  offline: false,
   pageless: true,
   'page-numbers': true,
   serve: false,
@@ -150,6 +151,7 @@ const { values: cliOpts, positionals } = parseArgs({
     engine:     { type: 'string', short: 'e' },
     'front-matter': { type: 'string' },
     html:       { type: 'boolean' },
+    offline:    { type: 'boolean' },
     pageless:   { type: 'boolean' },
     'page-numbers': { type: 'boolean' },
     header:     { type: 'string' },
@@ -192,6 +194,7 @@ Options:
   --host <addr>             Bind address: localhost (default) or 0.0.0.0 for network
   -o, --output <path>       Output file path (default: input.pdf alongside input)
   --html                    Output self-contained HTML instead of PDF
+  --offline                 With --html: inline runtimes (vega, mermaid) so it renders offline
   -m, --mobile              Optimize for phone reading (430px, smaller fonts)
   --rich-highlighting       Color built-ins and types distinctly (print, Optional, List, etc.)
   --toc-nav <features>      TOC navigation: inject, backlinks, smooth, float, all (comma-separated)
@@ -350,6 +353,12 @@ if (opts.launch !== undefined && !opts.serve && !opts['secret-gist']) {
   delete opts.launch;  // config-sourced launch, not applicable for this mode
 }
 
+// --offline inlines the interactive runtimes into the standalone HTML; only meaningful with --html
+if (opts.offline && !opts.html) {
+  console.error('Error: --offline requires --html.');
+  process.exit(1);
+}
+
 // --embed-images validation
 if (opts['embed-images'] && !opts.html && !opts.serve) {
   console.error('Error: --embed-images only applies to HTML or serve output. PDF embeds images via the browser engine.');
@@ -435,6 +444,7 @@ const DEPS = {
   '@hpcc-js/wasm-graphviz': '^1',
   'vega': '^5',
   'vega-lite': '^5',
+  'vega-embed': '^6',
 };
 
 function ensureDeps() {
@@ -519,6 +529,22 @@ const vega = require('vega');
 // Resolve the mermaid browser bundle path for injection into Puppeteer pages
 const mermaidPkgDir = dirname(require.resolve('mermaid/package.json'));
 const mermaidBundlePath = join(mermaidPkgDir, 'dist', 'mermaid.min.js');
+
+// Resolve Vega / Vega-Lite / Vega-Embed browser bundles for client-side
+// interactive charts (serve + standalone HTML). PDF mode renders Vega-Lite to
+// static SVG server-side instead (PDFs can't run JS). Resolve from the install
+// dir (node_modules) rather than require.resolve('<pkg>/package.json') — vega-embed's
+// "exports" map doesn't expose package.json (throws ERR_PACKAGE_PATH_NOT_EXPORTED).
+const nodeModulesDir = dirname(mermaidPkgDir);
+const vegaBundlePath = join(nodeModulesDir, 'vega', 'build', 'vega.min.js');
+const vegaLiteBundlePath = join(nodeModulesDir, 'vega-lite', 'build', 'vega-lite.min.js');
+const vegaEmbedBundlePath = join(nodeModulesDir, 'vega-embed', 'build', 'vega-embed.min.js');
+
+// Read a runtime bundle for inlining into a <script> (--html --offline). Escapes any
+// </script> in the bundle so it can't terminate the inline tag early.
+function inlineScript(path) {
+  return readFileSync(path, 'utf8').replace(/<\/script>/gi, '<\\/script>');
+}
 
 // ── Markdown to HTML ──────────────────────────────────────────────────────────
 
@@ -859,6 +885,9 @@ function resolveImagePathsForServe(html) {
 
 // Detect local image references in HTML (not data:, not http/https)
 function detectLocalImages(html) {
+  // Ignore <script> contents: inlined runtime bundles (--offline) contain <img>-like
+  // strings in their minified code that are not document images.
+  html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   const localImages = [];
   const imgRegex = /<img\s[^>]*src="([^"]+)"/gi;
   let m;
@@ -1231,23 +1260,29 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     }
   }
 
-  // Vega-Lite: <pre><code class="hljs language-vega-lite"> or language-chart
-  const vlPattern = /<pre><code class="(?:hljs )?language-(?:vega-lite|chart)">([\s\S]*?)<\/code><\/pre>/g;
-  const vlBlocks = [...processedBody.matchAll(vlPattern)];
-  for (const block of vlBlocks) {
-    const specText = block[1]
-      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
-      .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
-    try {
-      const spec = JSON.parse(specText);
-      const compiled = vl.compile(spec);
-      const view = new vega.View(vega.parse(compiled.spec), { renderer: 'none' });
-      const svg = await view.toSVG();
-      view.finalize();
-      processedBody = processedBody.replace(block[0],
-        `<div class="vega-lite-chart">${svg}</div>`);
-    } catch (e) {
-      console.warn('Warning: Vega-Lite render failed:', e.message);
+  // Vega-Lite: <pre><code class="hljs language-vega-lite"> or language-chart.
+  // PDF mode bakes these to static SVG here (PDFs can't run JS). Serve and
+  // standalone leave the spec block in place; the client-side Vega-Embed runtime
+  // (injected below) renders it interactively — tooltips, export menu, and
+  // pan/zoom/hover when the spec declares an interval/point param.
+  if (!forServe && !forStandalone) {
+    const vlPattern = /<pre><code class="(?:hljs )?language-(?:vega-lite|chart)">([\s\S]*?)<\/code><\/pre>/g;
+    const vlBlocks = [...processedBody.matchAll(vlPattern)];
+    for (const block of vlBlocks) {
+      const specText = block[1]
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+      try {
+        const spec = JSON.parse(specText);
+        const compiled = vl.compile(spec);
+        const view = new vega.View(vega.parse(compiled.spec), { renderer: 'none' });
+        const svg = await view.toSVG();
+        view.finalize();
+        processedBody = processedBody.replace(block[0],
+          `<div class="vega-lite-chart">${svg}</div>`);
+      } catch (e) {
+        console.warn('Warning: Vega-Lite render failed:', e.message);
+      }
     }
   }
 
@@ -1440,8 +1475,52 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     // Serve mode: load mermaid via HTTP
     mermaidScripts = `<script src="/mermaid.min.js"></script>${mermaidInitScript}`;
   } else if (hasMermaidBlocks && forStandalone) {
-    // Standalone HTML: load mermaid from CDN
-    mermaidScripts = `<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>${mermaidInitScript}`;
+    // Standalone HTML: inline the runtime for offline (--offline), else load from CDN
+    mermaidScripts = opts.offline
+      ? `<script>${inlineScript(mermaidBundlePath)}</script>${mermaidInitScript}`
+      : `<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>${mermaidInitScript}`;
+  }
+
+  // Vega-Lite client-side interactive rendering — serve + standalone only.
+  // (PDF mode already baked these to static SVG above.) Mirrors the Mermaid
+  // pattern: load the runtime, then convert vega-lite / chart code blocks into
+  // live charts via Vega-Embed — built-in tooltips, an export menu, and (when the
+  // spec declares an interval/point param) drag-pan, scroll-zoom, hover.
+  const hasVegaBlocks = (forServe || forStandalone) && /language-(?:vega-lite|chart)/.test(resolvedBody);
+  const vegaInitScript = `
+  <script>
+    (function() {
+      function showError(div, e) {
+        var pre = document.createElement('pre');
+        pre.style.color = '#b00020';
+        pre.textContent = 'Vega-Lite error: ' + (e && e.message ? e.message : e);
+        div.replaceChildren(pre);
+      }
+      function renderVega() {
+        document.querySelectorAll('pre > code.language-vega-lite, pre > code.language-chart').forEach(function(code) {
+          var pre = code.parentElement;
+          var div = document.createElement('div');
+          div.className = 'vega-lite-chart';
+          pre.replaceWith(div);
+          try {
+            var spec = JSON.parse(code.textContent);
+            vegaEmbed(div, spec, { actions: true, renderer: 'svg' }).catch(function(e) { showError(div, e); });
+          } catch (e) {
+            showError(div, e);
+          }
+        });
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', renderVega);
+      else renderVega();
+    })();
+  </script>`;
+  let vegaScripts = '';
+  if (hasVegaBlocks && forServe) {
+    vegaScripts = `<script src="/vega.min.js"></script><script src="/vega-lite.min.js"></script><script src="/vega-embed.min.js"></script>${vegaInitScript}`;
+  } else if (hasVegaBlocks && forStandalone) {
+    vegaScripts = opts.offline
+      ? `<script>${inlineScript(vegaBundlePath)}</script><script>${inlineScript(vegaLiteBundlePath)}</script><script>${inlineScript(vegaEmbedBundlePath)}</script>${vegaInitScript}`
+      : `<script src="https://cdn.jsdelivr.net/npm/vega@5/build/vega.min.js"></script><script src="https://cdn.jsdelivr.net/npm/vega-lite@5/build/vega-lite.min.js"></script><script src="https://cdn.jsdelivr.net/npm/vega-embed@6/build/vega-embed.min.js"></script>${vegaInitScript}`;
   }
 
   // Output metadata: timestamp (top-right) and filepath (bottom-left)
@@ -1722,6 +1801,13 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     .vega-lite-chart {
       margin: 16px 0;
       text-align: center;
+      width: 100%;
+    }
+    /* vega-embed wraps the chart in an inline-block .vega-embed; force it to fill
+       the container so a spec with width:"container" measures the real width
+       instead of collapsing to ~38px (the actions-menu button). */
+    .vega-lite-chart .vega-embed {
+      width: 100%;
     }
     .vega-lite-chart svg {
       max-width: 100%;
@@ -1736,6 +1822,7 @@ ${(forServe || forStandalone) ? timestampHtml : ''}
 ${(forServe || forStandalone) ? filepathHtml : ''}
 </body>
 ${mermaidScripts}
+${vegaScripts}
 ${sseScript}
 ${timestampScript}
 ${floatButtonScript}
@@ -2464,6 +2551,12 @@ async function startServer(initialHtml = null) {
       serveFile(res, mermaidBundlePath);
       return;
     }
+
+    // GET /vega*.min.js — serve the Vega / Vega-Lite / Vega-Embed browser bundles
+    // for client-side interactive charts in serve mode.
+    if (pathname === '/vega.min.js') { serveFile(res, vegaBundlePath); return; }
+    if (pathname === '/vega-lite.min.js') { serveFile(res, vegaLiteBundlePath); return; }
+    if (pathname === '/vega-embed.min.js') { serveFile(res, vegaEmbedBundlePath); return; }
 
     // GET /katex-fonts/* — serve KaTeX font files
     if (pathname.startsWith('/katex-fonts/')) {

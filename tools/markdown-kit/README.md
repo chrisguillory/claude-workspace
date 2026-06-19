@@ -138,7 +138,9 @@ Comprehensive feature comparison across rendering targets. Every feature is exer
 | Syntax highlighting | ` ```python ` | Yes | Yes | highlight.js (GitHub theme) vs Typora's CodeMirror |
 | Math (inline) | `$x^2$` | Yes | Configurable | marked-katex-extension + KaTeX |
 | Math (block) | `$$..$$` | Yes | Configurable | marked-katex-extension + KaTeX |
-| Mermaid diagrams | ` ```mermaid ` | Yes | Yes | mermaid.js (browser-injected) |
+| Mermaid diagrams | ` ```mermaid ` | Yes | Yes | mermaid.js (browser-injected; interactive in serve/standalone) |
+| Graphviz / DOT diagrams | ` ```dot ` / ` ```graphviz ` | Yes | No | @hpcc-js/wasm-graphviz → static SVG (all modes) |
+| Vega-Lite charts | ` ```vega-lite ` / ` ```chart ` | Yes | No | vega + vega-lite → static SVG for PDF; **interactive** (tooltips, zoom/pan, hover) in serve & standalone via vega-embed |
 | Footnotes | `[^1]` / `[^1]:` | Yes | Yes | marked-footnote |
 | Table of Contents | `[toc]` | Yes | Yes | marked-gfm-heading-id + custom replacement |
 | Highlight | `==text==` | Yes | Yes | Custom marked inline extension |
@@ -363,6 +365,10 @@ node markdown-kit.js input.md   # reinstalls latest versions
 | `marked-alert` | ^2 | GFM alert/admonition callout boxes |
 | `gray-matter` | ^4 | YAML front matter parsing |
 | `pdf-lib` | ^1 | PDF post-processing for internal link annotations (Chromium engine) |
+| `@hpcc-js/wasm-graphviz` | ^1 | Graphviz/DOT diagram rendering → static SVG (server-side, all modes) |
+| `vega` | ^5 | Vega runtime — compiles Vega-Lite → SVG for PDF; browser bundle for interactive serve/standalone |
+| `vega-lite` | ^5 | Vega-Lite grammar → Vega spec compiler |
+| `vega-embed` | ^6 | Client-side interactive chart embedding (tooltips, zoom/pan, hover) in serve/standalone |
 
 ---
 
