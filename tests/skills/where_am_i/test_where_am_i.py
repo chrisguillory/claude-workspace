@@ -53,6 +53,24 @@ def test_validator_rejects_a_broken_map(tmp_path: Path) -> None:
     assert _validate(target).returncode != 0
 
 
+def test_validator_rejects_unterminated_frontmatter(tmp_path: Path) -> None:
+    """An opening fence with no closing --- yields a clean issue, not a ValueError traceback."""
+    target = tmp_path / 'quest-map.md'
+    target.write_text('---\nartifact: where-am-i\nschema: 1\n')
+    result = _validate(target)
+    assert result.returncode != 0
+    assert 'frontmatter not closed' in result.stdout, result.stdout + result.stderr
+
+
+def test_validator_rejects_malformed_yaml(tmp_path: Path) -> None:
+    """Malformed frontmatter YAML yields a clean issue, not a YAMLError traceback."""
+    target = tmp_path / 'quest-map.md'
+    target.write_text('---\n\tbad: [unclosed\n---\n\nbody\n')
+    result = _validate(target)
+    assert result.returncode != 0
+    assert 'not valid YAML' in result.stdout, result.stdout + result.stderr
+
+
 def _validate(target: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ['uv', 'run', '--no-project', '--script', str(VALIDATOR), str(target)],

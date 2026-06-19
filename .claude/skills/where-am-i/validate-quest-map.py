@@ -52,7 +52,10 @@ def validate(path: Path) -> Sequence[str]:
     text = path.read_text()
     if not text.startswith('---\n'):
         return ['no YAML frontmatter']
-    _, frontmatter, body = text.split('---\n', 2)
+    parts = text.split('---\n', 2)
+    if len(parts) < 3:
+        return ['YAML frontmatter not closed (missing the second --- fence)']
+    _, frontmatter, body = parts
 
     issues: list[str] = []
     tree = body.split('\n— ', 1)[0]  # roots live above the overlay/footer "— …" markers, which reuse [N] refs
@@ -71,6 +74,8 @@ def validate(path: Path) -> Sequence[str]:
 
     try:
         quest_meta = QuestMapMeta.model_validate(yaml.safe_load(frontmatter))
+    except yaml.YAMLError as exc:
+        return [f'frontmatter is not valid YAML: {exc}']
     except ValidationError as exc:
         issues += [f'frontmatter {".".join(map(str, e["loc"]))}: {e["msg"]}' for e in exc.errors()]
     else:
@@ -119,7 +124,6 @@ class QuestMapMeta(ClosedModel):
     volume: Volume
     skills: Mapping[str, int]
     roots: Roots
-    top_mcp: Mapping[str, int] = Field(default_factory=dict)
     provenance: Sequence[Mapping[str, object]] = ()
 
 

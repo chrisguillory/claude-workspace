@@ -16,9 +16,8 @@ export const meta = {
 // Plain JS is mandatory (the runtime rejects TS syntax); the JSDoc @typedefs below are the typing layer.
 //
 // The phase order is load-bearing: the top map is assembled LAST, from the nodes' authoritative per-root
-// ground-truthing — so it can't freeze a wrong overlay the way a top-first pass did (the structural validator
-// can't catch a wrong PR label; the nodes are the semantic check, so they run first). Roots come from the roots
-// agent's return, not args, sidestepping the args-as-string trap.
+// ground-truthing, so the structural validator's blind spot (it can't catch a wrong PR label) is covered by
+// the nodes — the semantic check — which run first. Roots come from the roots agent's return, not args.
 //
 // args: { gatherDir } — holds user-intent-spine.txt / gh-ground-truth.txt / session-metadata.txt;
 // quest-map.md + nodes/{slug}.md are written there.
@@ -82,6 +81,11 @@ Return the root list: each root's number (1..N, first-touched order), an NN-keba
   { label: 'roots', phase: 'Roots', schema: ROOTS_SCHEMA },
 )
 if (!skeleton?.roots?.length) throw new Error('no roots identified from the spine')
+const slugs = skeleton.roots.map((r) => r.slug)
+if (new Set(slugs).size !== slugs.length) {
+  // node files AND the facts→top merge both key on slug; a collision silently clobbers/collapses, so fail loud
+  throw new Error(`roots agent produced duplicate slugs (${slugs.join(', ')}) — re-run`)
+}
 log(`${skeleton.roots.length} roots → fanning out per-node ground-truthing`)
 
 phase('Nodes')

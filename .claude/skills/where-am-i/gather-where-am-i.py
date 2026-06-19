@@ -25,9 +25,9 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from cc_lib import ErrorBoundary
+from cc_lib.schemas.base import SubsetModel
 
 PACIFIC = ZoneInfo('America/Los_Angeles')
-PROJECTS = Path.home() / '.claude' / 'projects'
 # user-role messages that are injected noise, not directives — dropped from the spine
 SKIP = (
     'This session is being continued from a previous',
@@ -36,7 +36,10 @@ SKIP = (
 )
 
 
-@ErrorBoundary(exit_code=1)
+boundary = ErrorBoundary(exit_code=1)
+
+
+@boundary
 def main() -> None:
     transcript = _resolve(sys.argv[1] if len(sys.argv) > 1 else None)
     out = Path(tempfile.mkdtemp(prefix='where-am-i-'))  # ephemeral staging; hoist promotes to the store
@@ -56,16 +59,23 @@ def main() -> None:
     )
 
 
+class SessionInfo(SubsetModel):
+    """The transcript path from `claude-session info` — the one field the gather needs."""
+
+    session_file: str
+
+
 def _resolve(arg: str | None) -> Path:
+    """The transcript path via the canonical `claude-session info` resolver (the sibling-skill pattern).
+
+    No arg → the CLI auto-detects the invoking session; a prefix → it resolves and fails loud on an
+    ambiguous or unknown id. `session_file` comes back directly — no glob or mtime heuristic.
+    """
+    cmd = ['claude-session', 'info', '--format', 'json']
     if arg:
-        matches = sorted(PROJECTS.glob(f'*/{arg}*.jsonl'))
-        if not matches:
-            sys.exit(f'no transcript found for session {arg!r} under {PROJECTS}')
-        return matches[0]
-    candidates = [p for d in PROJECTS.iterdir() if d.is_dir() for p in d.glob('*.jsonl')]
-    if not candidates:
-        sys.exit(f'no transcripts found under {PROJECTS}')
-    return max(candidates, key=lambda p: p.stat().st_mtime)  # the actively-written one = current session
+        cmd.insert(2, arg)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return Path(SessionInfo.model_validate(json.loads(result.stdout)).session_file)
 
 
 def _session_start(transcript: Path) -> str:
@@ -115,8 +125,8 @@ def _write_truth(dst: Path, since: str) -> None:
     """The git/GitHub ground truth, with merged PRs windowed to the session span.
 
     Windowing to `merged:>=since` makes the bound the session's own span, not an arbitrary count; a fetch
-    that hits the cap fails loud rather than silently truncating — the failure mode that once mislabeled
-    older roots when --limit cut them off.
+    that hits the cap fails loud rather than silently truncating to a partial PR list (which would let the
+    map mislabel roots whose older PRs were cut).
     """
     cap = 500  # safety backstop well above one session's PR count — the guard below makes a hit loud, not silent
 
@@ -171,6 +181,11 @@ def _write_meta(transcript: Path, dst: Path) -> str:
         f'skills (approx — re-injection inflates): {", ".join(f"{k} x{v}" for k, v in top[:8])}\n'
     )
     return f'{compactions} compactions · {subagents} subagents · top: {", ".join(k for k, _ in top[:3])}'
+
+
+@boundary.handler(subprocess.CalledProcessError)
+def _on_command_fail(exc: subprocess.CalledProcessError) -> None:
+    print(f'gather command failed (exit {exc.returncode}): {exc.cmd}\n{exc.stderr}', file=sys.stderr)
 
 
 if __name__ == '__main__':

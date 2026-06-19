@@ -13,7 +13,8 @@
 The build writes to a throwaway temp dir, so it never touches Anthropic's `~/.claude` session dir. This
 promotes that output to `<main-repo>/claude-sessions/{id8}/where-am-i/` — diffing against any existing copy
 first (a re-run surfaces what changed instead of silently overwriting) and keeping the prior copy as
-`where-am-i.prev` for comparison. The promote is atomic: copy onto the store's filesystem, then rename.
+`where-am-i.prev` for comparison. The promote copies onto the store's filesystem, then publishes with a
+rename — each rename is atomic, so the store is never a partial copy (the prior is moved to `.prev` first).
 """
 
 from __future__ import annotations
@@ -68,7 +69,7 @@ def _check_valid(quest_map: Path) -> None:
         check=False,
     )
     if result.returncode != 0:
-        sys.exit(f'refusing to hoist a map that fails validation:\n{result.stdout}')
+        sys.exit(f'refusing to hoist a map that fails validation:\n{result.stdout}{result.stderr}')
 
 
 def _print_diff(old: Path, new: Path) -> None:
@@ -91,7 +92,7 @@ def _promote(staging: Path, store: Path) -> None:
     if store.exists():  # keep the prior copy for comparison
         shutil.rmtree(prev, ignore_errors=True)
         store.rename(prev)
-    incoming.rename(store)  # atomic swap into place
+    incoming.rename(store)  # publish: rename onto the store's filesystem
 
 
 if __name__ == '__main__':

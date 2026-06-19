@@ -84,7 +84,8 @@ finer how-recently-did-this-go-cold signal.
 **PR / docket overlays — never structural.** Below the tree: a PR overlay where a PR spanning multiple
 roots floats on its own line *above* the roots it served, and a PR within one root attaches to that
 root; then a docket overlay mapping each entry seeded this session to the root it backs. Items never
-bend to fit PR or docket boundaries.
+bend to fit PR or docket boundaries. Each overlay (and the footer) **opens with a `— {label} —` marker
+line**, so the tree ends at the first `— ` marker — where the validator stops counting roots.
 
 **Provenance.** If a thread entered from elsewhere (a `git pull` of another session's work, a discovered
 session the user then built on), note its origin (session, machine, still-alive?). It counts as a node
