@@ -373,10 +373,11 @@ from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal
 
 import pydantic
+from cc_lib.schemas.base import EmptySequence
 from cc_lib.types import CCVersion
 
 from claude_session.schemas.session.markers import CCVersionStrField, PathField, PathListField
-from claude_session.schemas.types import BaseStrictModel, EmptySequence, ModelId, PermissiveModel
+from claude_session.schemas.types import BaseStrictModel, ModelId, PermissiveModel
 
 __all__ = [
     'CLAUDE_CODE_MAX_VERSION',
