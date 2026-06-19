@@ -316,6 +316,10 @@ class _Usage(OpenModel):
     prompt_tokens: int
     total_tokens: int
     cost: float | None = None  # OpenRouter-specific, not consumed
+    is_byok: bool | None = None  # OpenRouter-specific, not consumed
+    cost_details: Mapping[str, Any] | None = (
+        None  # strict_typing_linter.py: loose-typing — OpenRouter cost breakdown, not consumed
+    )
 
 
 class _EmbeddingResponse(OpenModel):
