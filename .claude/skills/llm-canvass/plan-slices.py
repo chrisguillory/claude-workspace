@@ -86,7 +86,7 @@ def main(
     per_agent_tokens: Annotated[
         int,
         typer.Option('--per-agent-tokens', help='Source-token budget per agent.'),
-    ] = 120_000,
+    ] = 400_000,
 ) -> None:
     """Enumerate files, bin-pack into balanced slices, write brief + slices, print the plan."""
     if not (file_type or glob or all_):
