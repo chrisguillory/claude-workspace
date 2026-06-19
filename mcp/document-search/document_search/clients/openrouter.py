@@ -312,14 +312,23 @@ class _Embedding(OpenModel):
     index: int
 
 
+class _CostDetails(OpenModel):
+    """OpenRouter's per-request upstream cost breakdown — nonzero only for BYOK requests."""
+
+    upstream_inference_cost: float | None = None
+    upstream_inference_prompt_cost: float | None = None
+    upstream_inference_completions_cost: float | None = None
+
+
 class _Usage(OpenModel):
     prompt_tokens: int
     total_tokens: int
     cost: float | None = None  # OpenRouter-specific, not consumed
-    is_byok: bool | None = None  # OpenRouter-specific, not consumed
-    cost_details: Mapping[str, Any] | None = (
-        None  # strict_typing_linter.py: loose-typing — OpenRouter cost breakdown, not consumed
-    )
+    is_byok: bool | None = None
+    """Bring-Your-Own-Key: whether an upstream provider key billed this request
+    instead of OpenRouter credits. Always false for us; not consumed."""
+    cost_details: _CostDetails | None = None
+    """Per-request upstream cost breakdown; nonzero only for BYOK requests. Not consumed."""
 
 
 class _EmbeddingResponse(OpenModel):
