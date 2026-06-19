@@ -306,18 +306,19 @@ class OpenRouterClient:
 # ── OpenRouter API response models ───────────────────────────────────
 
 
+class _EmbeddingResponse(OpenModel):
+    id: str | None = None  # OpenRouter-specific, not consumed
+    object: str  # OpenAI spec field name
+    data: Sequence[_Embedding]
+    model: str
+    usage: _Usage
+    provider: str | None = None  # OpenRouter-specific, not consumed
+
+
 class _Embedding(OpenModel):
     object: str  # OpenAI spec field name
     embedding: Sequence[float] | str
     index: int
-
-
-class _CostDetails(OpenModel):
-    """OpenRouter's per-request upstream cost breakdown — nonzero only for BYOK requests."""
-
-    upstream_inference_cost: float | None = None
-    upstream_inference_prompt_cost: float | None = None
-    upstream_inference_completions_cost: float | None = None
 
 
 class _Usage(OpenModel):
@@ -331,13 +332,16 @@ class _Usage(OpenModel):
     """Per-request upstream cost breakdown; nonzero only for BYOK requests. Not consumed."""
 
 
-class _EmbeddingResponse(OpenModel):
-    id: str | None = None  # OpenRouter-specific, not consumed
-    object: str  # OpenAI spec field name
-    data: Sequence[_Embedding]
-    model: str
-    usage: _Usage
-    provider: str | None = None  # OpenRouter-specific, not consumed
+class _CostDetails(OpenModel):
+    """OpenRouter's per-request upstream cost breakdown — nonzero only for BYOK requests."""
+
+    upstream_inference_cost: float | None = None
+    upstream_inference_prompt_cost: float | None = None
+    upstream_inference_completions_cost: float | None = None
+
+
+class _ErrorResponse(OpenModel):
+    error: _ErrorDetail
 
 
 class _ErrorDetail(OpenModel):
@@ -347,10 +351,6 @@ class _ErrorDetail(OpenModel):
     metadata: Mapping[str, Any] | None = (
         None  # strict_typing_linter.py: loose-typing — provider-specific metadata with no stable schema
     )
-
-
-class _ErrorResponse(OpenModel):
-    error: _ErrorDetail
 
 
 class _ModelsListResponse(OpenModel):
