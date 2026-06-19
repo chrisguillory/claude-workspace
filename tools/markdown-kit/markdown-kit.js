@@ -123,6 +123,7 @@ const DEFAULTS = {
   host: 'localhost',
   'toc-nav': '',
   html: false,
+  offline: false,
   pageless: true,
   'page-numbers': true,
   serve: false,
@@ -150,6 +151,7 @@ const { values: cliOpts, positionals } = parseArgs({
     engine:     { type: 'string', short: 'e' },
     'front-matter': { type: 'string' },
     html:       { type: 'boolean' },
+    offline:    { type: 'boolean' },
     pageless:   { type: 'boolean' },
     'page-numbers': { type: 'boolean' },
     header:     { type: 'string' },
@@ -192,6 +194,7 @@ Options:
   --host <addr>             Bind address: localhost (default) or 0.0.0.0 for network
   -o, --output <path>       Output file path (default: input.pdf alongside input)
   --html                    Output self-contained HTML instead of PDF
+  --offline                 With --html: inline runtimes (vega, mermaid) so it renders offline
   -m, --mobile              Optimize for phone reading (430px, smaller fonts)
   --rich-highlighting       Color built-ins and types distinctly (print, Optional, List, etc.)
   --toc-nav <features>      TOC navigation: inject, backlinks, smooth, float, all (comma-separated)
@@ -348,6 +351,12 @@ if (opts.launch !== undefined && !opts.serve && !opts['secret-gist']) {
     process.exit(1);
   }
   delete opts.launch;  // config-sourced launch, not applicable for this mode
+}
+
+// --offline inlines the interactive runtimes into the standalone HTML; only meaningful with --html
+if (opts.offline && !opts.html) {
+  console.error('Error: --offline requires --html.');
+  process.exit(1);
 }
 
 // --embed-images validation
@@ -530,6 +539,12 @@ const nodeModulesDir = dirname(mermaidPkgDir);
 const vegaBundlePath = join(nodeModulesDir, 'vega', 'build', 'vega.min.js');
 const vegaLiteBundlePath = join(nodeModulesDir, 'vega-lite', 'build', 'vega-lite.min.js');
 const vegaEmbedBundlePath = join(nodeModulesDir, 'vega-embed', 'build', 'vega-embed.min.js');
+
+// Read a runtime bundle for inlining into a <script> (--html --offline). Escapes any
+// </script> in the bundle so it can't terminate the inline tag early.
+function inlineScript(path) {
+  return readFileSync(path, 'utf8').replace(/<\/script>/gi, '<\\/script>');
+}
 
 // ── Markdown to HTML ──────────────────────────────────────────────────────────
 
@@ -1457,8 +1472,10 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     // Serve mode: load mermaid via HTTP
     mermaidScripts = `<script src="/mermaid.min.js"></script>${mermaidInitScript}`;
   } else if (hasMermaidBlocks && forStandalone) {
-    // Standalone HTML: load mermaid from CDN
-    mermaidScripts = `<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>${mermaidInitScript}`;
+    // Standalone HTML: inline the runtime for offline (--offline), else load from CDN
+    mermaidScripts = opts.offline
+      ? `<script>${inlineScript(mermaidBundlePath)}</script>${mermaidInitScript}`
+      : `<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>${mermaidInitScript}`;
   }
 
   // Vega-Lite client-side interactive rendering — serve + standalone only.
@@ -1498,7 +1515,9 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
   if (hasVegaBlocks && forServe) {
     vegaScripts = `<script src="/vega.min.js"></script><script src="/vega-lite.min.js"></script><script src="/vega-embed.min.js"></script>${vegaInitScript}`;
   } else if (hasVegaBlocks && forStandalone) {
-    vegaScripts = `<script src="https://cdn.jsdelivr.net/npm/vega@5/build/vega.min.js"></script><script src="https://cdn.jsdelivr.net/npm/vega-lite@5/build/vega-lite.min.js"></script><script src="https://cdn.jsdelivr.net/npm/vega-embed@6/build/vega-embed.min.js"></script>${vegaInitScript}`;
+    vegaScripts = opts.offline
+      ? `<script>${inlineScript(vegaBundlePath)}</script><script>${inlineScript(vegaLiteBundlePath)}</script><script>${inlineScript(vegaEmbedBundlePath)}</script>${vegaInitScript}`
+      : `<script src="https://cdn.jsdelivr.net/npm/vega@5/build/vega.min.js"></script><script src="https://cdn.jsdelivr.net/npm/vega-lite@5/build/vega-lite.min.js"></script><script src="https://cdn.jsdelivr.net/npm/vega-embed@6/build/vega-embed.min.js"></script>${vegaInitScript}`;
   }
 
   // Output metadata: timestamp (top-right) and filepath (bottom-left)
@@ -1779,6 +1798,13 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     .vega-lite-chart {
       margin: 16px 0;
       text-align: center;
+      width: 100%;
+    }
+    /* vega-embed wraps the chart in an inline-block .vega-embed; force it to fill
+       the container so a spec with width:"container" measures the real width
+       instead of collapsing to ~38px (the actions-menu button). */
+    .vega-lite-chart .vega-embed {
+      width: 100%;
     }
     .vega-lite-chart svg {
       max-width: 100%;
