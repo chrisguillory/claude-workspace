@@ -30,14 +30,14 @@ allowed-tools:
 
 ### Phase 1: Context enrichment
 
-Before drafting, get the *why*, not just the *what*:
+Before drafting, get the *why* — and the *why* is the user's, not yours.
 
-- **Session transcript** — use `mcp__document-search__search_documents` (collection `document-chunks`) to recover the architectural decisions, user corrections, and research findings behind this change. The gather step above indexed it.
-- **Related PRs** — if this is a follow-up or stacked change.
+**Mandate gate — read it from the spine, or halt.** The gather extracted the session's full **user-intent spine** (every verbatim user directive, deterministic) to the path it printed — *this*, not semantic search, is the source of record for why the change exists. Hand the spine **and this branch's diff/commits** to an agent (the spine can be long — let the agent read all of it) and have it return the user directive(s) this change folds into. That match is the **mandate**:
 
-The git context (commits, files changed, existing-PR mode) is in the gathered output above. Do **not** draft until you understand why the change was made.
+- **Found** → **codify it in the body** (paraphrased — the spine is verbatim user text and this repo is public) so the PR carries its own provenance. Intent *bolsters* the PR; it doesn't just clear a gate.
+- **Absent** → the spine holds every ask and none fits. **Stop and ask before drafting** ("I can't find where you asked for this — is it intended?"). A rationale reconstructed from the diff is **not** a mandate — *"I can justify this" ≠ "the user wanted this,"* and they diverge exactly when it's most dangerous: a plausible, well-described, unasked-for change. Doubly so when codifying uncommitted work — `git log -- <files>` first; a change that reverts a merged PR with no spine entry behind it is a discard candidate, not a PR.
 
-**Mandate gate — find the user's intent, or halt.** The *why* must trace to an **affirmative user mandate**: a directive in the transcript, a filed issue/docket item, or an explicit in-session ask. A rationale you can reconstruct from the diff is **not** a mandate — *"I can justify this"* is not *"the user wanted this,"* and they diverge exactly when it's most dangerous: a plausible, well-described, unasked-for change. If the search turns up no mandate — only your own reasoning or the diff itself — **stop and ask before drafting** ("I can't find where you asked for this — is it intended?"). An origin you can't place is the strongest signal a change shouldn't ship. Doubly so when **codifying uncommitted work**: run `git log -- <files>` first — an uncommitted change that reverts a merged PR with no decision trail is a discard candidate, not a PR.
+**Then enrich** — beyond the bare ask, recover the decisions and research behind the change via `mcp__document-search__search_documents` (collection `document-chunks`, the indexed transcript) and related/stacked PRs. The git context (commits, files changed, existing-PR mode) is in the gathered output above. Do **not** draft until the mandate is established or escalated.
 
 ### Phase 2: Scratch file
 
