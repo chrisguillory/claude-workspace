@@ -475,7 +475,8 @@ function getVisualSnapshot(rootSelector, includeUrls, includeHidden = false) {
         // Add URL for links: always if no name (provides essential info),
         // or if includeUrls explicitly requested
         if (role === 'link' && el.href && (includeUrls || !name)) {
-            node.url = el.href;
+            // el.href is an SVGAnimatedString on SVG links; coerce to a string
+            node.url = typeof el.href === 'string' ? el.href : (el.href && el.href.baseVal) || el.getAttribute('href') || null;
         }
 
         // Propagate hidden state to children
