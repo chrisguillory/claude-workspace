@@ -83,11 +83,12 @@ def add_install_command(app: typer.Typer, *, script_path: str) -> None:
 
     @app.command(rich_help_panel='Tool Management')
     def install(
+        ctx: typer.Context,
         shell: str | None = typer.Option(None, '--shell', help='Shell for completions (default: auto-detect)'),
     ) -> None:
         """Install to PATH with shell completions."""
         console = rich.console.Console(stderr=True)
-        prog_name = _prog_name_from_context()
+        prog_name = _prog_name(ctx)
 
         path = launcher.install(prog_name)
         console.print(f'Launcher: [bold]{path}[/bold]')
@@ -105,11 +106,12 @@ def add_install_command(app: typer.Typer, *, script_path: str) -> None:
 
     @app.command(rich_help_panel='Tool Management')
     def uninstall(
+        ctx: typer.Context,
         shell: str | None = typer.Option(None, '--shell', help='Shell for completions (default: auto-detect)'),
     ) -> None:
         """Remove from PATH and shell completions."""
         console = rich.console.Console(stderr=True)
-        prog_name = _prog_name_from_context()
+        prog_name = _prog_name(ctx)
 
         removed = launcher.uninstall(prog_name)
         if removed:
@@ -125,10 +127,11 @@ def add_install_command(app: typer.Typer, *, script_path: str) -> None:
 
     @app.command(hidden=True)
     def completion(
+        ctx: typer.Context,
         shell: str | None = typer.Argument(None, help='Shell type (default: auto-detect)'),
     ) -> None:
         """Print shell tab completion script to stdout."""
-        prog_name = _prog_name_from_context()
+        prog_name = _prog_name(ctx)
         shell_name = shell or _detect_shell()
         if not shell_name:
             print('Shell not detected — pass shell name as argument.', file=sys.stderr)
@@ -146,11 +149,12 @@ def add_completion_command(app: typer.Typer) -> None:
 
     @app.command('install-completions', rich_help_panel='Shell Completions')
     def install_completions(
+        ctx: typer.Context,
         shell: str | None = typer.Option(None, '--shell', help='Shell (default: auto-detect)'),
     ) -> None:
         """Install shell tab completions."""
         console = rich.console.Console(stderr=True)
-        prog_name = _prog_name_from_context()
+        prog_name = _prog_name(ctx)
         shell_name = shell or _detect_shell()
         if not shell_name:
             console.print('[red]Shell not detected — pass --shell zsh[/red]')
@@ -165,11 +169,12 @@ def add_completion_command(app: typer.Typer) -> None:
 
     @app.command('uninstall-completions', rich_help_panel='Shell Completions')
     def uninstall_completions(
+        ctx: typer.Context,
         shell: str | None = typer.Option(None, '--shell', help='Shell (default: auto-detect)'),
     ) -> None:
         """Remove shell tab completions."""
         console = rich.console.Console(stderr=True)
-        prog_name = _prog_name_from_context()
+        prog_name = _prog_name(ctx)
         shell_name = shell or _detect_shell()
         if not shell_name:
             console.print('[red]Shell not detected — pass --shell zsh[/red]')
@@ -182,10 +187,11 @@ def add_completion_command(app: typer.Typer) -> None:
 
     @app.command(hidden=True)
     def show_completion(
+        ctx: typer.Context,
         shell: str | None = typer.Argument(None, help='Shell type (default: auto-detect)'),
     ) -> None:
         """Print shell tab completion script to stdout."""
-        prog_name = _prog_name_from_context()
+        prog_name = _prog_name(ctx)
         shell_name = shell or _detect_shell()
         if not shell_name:
             print('Shell not detected — pass shell name as argument.', file=sys.stderr)
@@ -219,6 +225,7 @@ def add_help_command(app: typer.Typer) -> None:
 
     @app.command('help', rich_help_panel='Documentation')
     def help_cmd(
+        ctx: typer.Context,
         subcommand: str | None = typer.Argument(
             None,
             autocompletion=_complete_subcommand,
@@ -232,7 +239,6 @@ def add_help_command(app: typer.Typer) -> None:
         ),
     ) -> None:
         """Show help — bare for top-level, with subcommand for one, --recursive for all."""
-        ctx = click.get_current_context()
         if subcommand and recursive:
             raise click.UsageError(
                 'Cannot combine --recursive with a subcommand argument.',
@@ -511,9 +517,8 @@ def _detect_shell() -> str | None:
     return name if name in ('zsh', 'bash') else None
 
 
-def _prog_name_from_context() -> str:
-    """Derive prog_name from the current click context."""
-    ctx = click.get_current_context()
+def _prog_name(ctx: click.Context) -> str:
+    """Derive prog_name from a command's injected click context."""
     return ctx.find_root().info_name or 'unknown'
 
 
