@@ -956,7 +956,8 @@ class BrowserService:
                     text: text.substring(0, 100),
                     selector: selector,
                     cursor: style.cursor,
-                    href: el.href || null,
+                    // el.href is an SVGAnimatedString on SVG nodes (not a string); coerce to string|null
+                    href: typeof el.href === 'string' ? el.href : (el.href && el.href.baseVal) || el.getAttribute('href') || null,
                     classes: el.getAttribute('class') || ''
                 });
             });
