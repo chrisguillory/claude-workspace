@@ -29,12 +29,6 @@ echo "your-key" > ~/.claude-workspace/secrets/document_search_api_key
 "MCP_TOOL_TIMEOUT": "1800000"  # 30 minutes (in ms)
 ```
 
-**Tesseract** (optional, for OCR on scanned PDFs):
-
-```bash
-brew install tesseract
-```
-
 ## Installation
 
 ```bash
