@@ -1798,6 +1798,13 @@ async function buildHtml({ forServe = false, forStandalone = false } = {}) {
     .vega-lite-chart {
       margin: 16px 0;
       text-align: center;
+      width: 100%;
+    }
+    /* vega-embed wraps the chart in an inline-block .vega-embed; force it to fill
+       the container so a spec with width:"container" measures the real width
+       instead of collapsing to ~38px (the actions-menu button). */
+    .vega-lite-chart .vega-embed {
+      width: 100%;
     }
     .vega-lite-chart svg {
       max-width: 100%;
