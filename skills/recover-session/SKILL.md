@@ -36,19 +36,27 @@ transcript's uuid→parentUuid tree) before reconstructing:
 
 ### Phase 2: Orient from git state
 
-Ground truth of what actually shipped. Run:
+Ground truth of what actually shipped. The `## Git orientation` block above is generated
+deterministically at load: it tables every worktree (branch, HEAD, dirty, commits ahead of
+trunk) and ★-marks the work-candidate tree(s) — and for the ★ tree it inlines recent commits,
+working-tree status, and stashes. **Read that block; don't re-run git by hand.**
+Cross-reference it against recovered context in later phases.
 
-```bash
-git status
-git log --oneline -20
-git diff --stat
-git stash list
-git worktree list
-git branch -v
-```
+**Edit-application audit.** When a compaction summary claims edits were applied to specific
+files, diff the working tree against those claims (`git diff`, `git status --short`). A
+claimed-but-absent edit means a tool call silently failed mid-batch — e.g. one Edit in a
+multi-edit message didn't match because the target text had shifted. This is the
+highest-value cross-check when recovering a just-compacted session you're still inside.
 
-Git shows what was ACTUALLY delivered vs what was planned. Cross-reference against
-recovered context in later phases.
+**Audit the ★ tree, not the cwd.** Worktrees split the audit target: the launch cwd is often
+a clean sibling, not where the work lives. Run the edit-application audit against the
+★-marked worktree that owns the in-progress branch (flagged in `## Git orientation`), not the
+launch cwd.
+
+**Re-check outward state.** A summary is stale on anything that moved after it was written:
+re-verify via `gh pr list` / `git log` anything it calls open/pending (a summary's *"PR #N
+open, awaiting review"* is routinely already merged or closed), plus branch deletions and CI
+status. Git wins on remote state, not just local edits.
 
 ### Phase 3: Establish the session narrative
 
@@ -83,6 +91,15 @@ Search the session directory specifically for detailed subagent research that wa
 fully surfaced to the main conversation.
 
 When search points to a relevant area, THEN drill into the JSONL for more context.
+
+**If you can't recover completely, HARD-FAIL — never half-recover.** In a compacted session
+the conversation is *gone*, so the semantic index IS the lost context: load-bearing, not
+optional, with no fallback. If document-search is unavailable (a down MCP server, an
+embedding-provider overload), do NOT proceed on git + summary alone — a half-baked recovery
+is a footgun that proliferates poison: it reads as complete, so every downstream decision
+silently inherits its blind spots. STOP, surface the failure, fix the index (reconnect
+document-search; wait out the overload), then recover. Better no recovery than a confident,
+incomplete one.
 
 ### Phase 5: Check persistent artifacts
 
