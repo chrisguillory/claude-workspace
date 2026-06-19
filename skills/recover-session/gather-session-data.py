@@ -8,15 +8,17 @@
 # ]
 #
 # [tool.uv.sources]
-# cc-lib = { path = "../../../claude-workspace/cc-lib/", editable = true }
-# document-search = { path = "../../../claude-workspace/mcp/document-search/", editable = true }
+# cc-lib = { path = "../../cc-lib/", editable = true }
+# document-search = { path = "../../mcp/document-search/", editable = true }
 # ///
 """Gather session data, index artifacts, and output structured metadata.
 
 Called by the /recover-session skill. Resolves session via `claude-session info`,
-indexes the transcript and session directory via `document-search index`, analyzes the
-transcript's record tree for forked/orphaned branches, recovers user messages sent
-directly to subagent forks, and emits structured text optimized for model consumption.
+orients against deterministic git ground-truth (every worktree's branch/status, with deep
+detail for the work-candidate tree(s)), indexes the transcript and session directory via
+`document-search index`, analyzes the transcript's record tree for forked/orphaned branches,
+recovers user messages sent directly to subagent forks, and emits structured text optimized
+for model consumption.
 
 PARSING — local SubsetModel vocabulary, not the full claude-session schema
 --------------------------------------------------------------------------
@@ -69,12 +71,12 @@ import re
 import subprocess
 import sys
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 
 import pydantic
 from cc_lib import ErrorBoundary
-from cc_lib.schemas.base import SubsetModel
+from cc_lib.schemas.base import ClosedModel, SubsetModel
 from document_search.schemas.indexing import IndexingResult
 from pydantic import BaseModel
 
@@ -88,6 +90,7 @@ STALE_FORK_MIN_RECORDS = 10  # orphan size below which a late live sibling is no
 MIN_REPORTED_ORPHAN_RECORDS = 5  # smaller orphans without user messages roll up into a count
 MESSAGE_PREVIEW_CHARS = 240
 BRANCH_MESSAGE_CAP = 10
+RECENT_COMMITS_SHOWN = 10  # `git log --oneline -N` depth in the deep detail for work-candidate trees
 
 # ---------------------------------------------------------------------------
 # Transcript-record vocabulary (subset of the JSONL we read; extras ignored)
@@ -136,11 +139,12 @@ class RecordMessage(SubsetModel):
 class TranscriptRecord(SubsetModel):
     """The tree-walkable subset of a session record.
 
-    Fields from ``BaseRecord`` (uuid/timestamp/type) and ``UserRecord`` (parentUuid/isMeta/
+    Fields from ``BaseRecord`` (uuid/timestamp/type/cwd) and ``UserRecord`` (parentUuid/isMeta/
     origin/message; assistant records share the chain fields).
 
     ``uuid`` is None on summary/snapshot/queue records; ``parentUuid`` is None at chain
-    roots (compaction restarts); ``origin``/``message`` are absent on non-message records.
+    roots (compaction restarts); ``origin``/``message`` are absent on non-message records;
+    ``cwd`` is the launch directory, present on message/event records.
 
     >>> # noinspection PyUnresolvedReferences
     >>> from claude_session.schemas.session.models import BaseRecord, UserRecord
@@ -153,6 +157,7 @@ class TranscriptRecord(SubsetModel):
     isMeta: bool | None = None
     origin: RecordOrigin | None = None
     message: RecordMessage | None = None
+    cwd: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -214,10 +219,48 @@ class ForkDirect(BaseModel):
     messages: Sequence[UserMessage]
 
 
+class WorktreeStatus(ClosedModel):
+    """One git worktree's deterministic ground-truth for recovery orientation."""
+
+    path: str
+    branch: str  # branch name, or '(detached)'
+    head_short: str
+    dirty: bool
+    ahead_of_trunk: int  # commits on HEAD not on trunk (main/master); 0 if no trunk
+    locked: bool
+    is_session_cwd: bool
+    last_commit_subject: str
+
+    @property
+    def is_work_candidate(self) -> bool:
+        """Dirty or ahead of trunk ⇒ likely holds in-progress work (not a clean trunk checkout)."""
+        return self.dirty or self.ahead_of_trunk > 0
+
+
+class WorktreeDetail(ClosedModel):
+    """Deep git state for a work-candidate tree (or the session-cwd tree when none qualify).
+
+    Commits are windowed to the session's lifetime (``git log --since=first_message_at``) so
+    they answer "what did THIS session do", not "what are the last N commits"; an absent
+    anchor falls back to a fixed ``-N`` count. The blobs are raw git output, emitted verbatim.
+    """
+
+    path: str
+    branch: str
+    recent_commits: Sequence[str]  # `git log --oneline` lines, session-windowed (may be empty)
+    commits_session_windowed: bool  # True ⇒ since session start; False ⇒ fixed -N fallback
+    status_short: Sequence[str]  # `git status --short` lines (may be empty)
+    diff_stat: str  # `git diff --stat` summary line (uncommitted changes); '' if clean
+    stashes: Sequence[str]  # `git stash list` lines (may be empty)
+
+
 class SessionData(SubsetModel):
     """Top-level container for all gathered session data."""
 
     session: SessionInfo
+    session_cwd: str | None
+    worktrees: Sequence[WorktreeStatus]
+    worktree_details: Sequence[WorktreeDetail]
     transcript_size_mb: float
     transcript_lines: int
     transcript_parse_failures: Mapping[str, int]
@@ -257,8 +300,8 @@ def main() -> None:
 class SessionGatherer:
     """Resolve, analyze, index, and report on a Claude Code session.
 
-    Single pipeline: resolve session -> typed parse -> fork analysis -> scan directory
-    -> index artifacts -> format output.
+    Single pipeline: resolve session -> typed parse -> fork analysis -> git orientation
+    -> scan directory -> index artifacts -> format output.
     """
 
     def run(self, session_id: str | None = None) -> int:
@@ -323,6 +366,13 @@ class SessionGatherer:
         fork_paths = _fork_transcripts(session_dir)
         fork_direct, fork_failures = _fork_direct_messages(records, fork_paths)
 
+        # Git ground-truth (fast, deterministic) — every worktree's branch + status, plus
+        # deep detail for the work-candidate tree(s) (session-cwd tree if none qualify).
+        print('Orienting git worktrees...', file=sys.stderr)
+        session_cwd = self._session_cwd(session)
+        worktrees = self._enumerate_worktrees(session_cwd) if session_cwd else []
+        worktree_details = self._worktree_details(session, worktrees)
+
         # Index transcript
         print(f'Indexing transcript ({transcript_size_mb} MB, {transcript_lines} lines)...', file=sys.stderr)
         transcript_index = self._index_path(str(transcript))
@@ -335,6 +385,9 @@ class SessionGatherer:
 
         return SessionData(
             session=session,
+            session_cwd=str(session_cwd) if session_cwd else None,
+            worktrees=worktrees,
+            worktree_details=worktree_details,
             transcript_size_mb=transcript_size_mb,
             transcript_lines=transcript_lines,
             transcript_parse_failures=parse_failures,
@@ -365,6 +418,113 @@ class SessionGatherer:
 
         return IndexingResult.model_validate(json.loads(result.stdout))
 
+    def _git(self, cwd: Path | str, *args: str) -> str | None:
+        """Run a git subcommand in `cwd`; return stripped stdout, or None on non-zero exit."""
+        result = subprocess.run(['git', '-C', str(cwd), *args], capture_output=True, text=True, check=False)
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    def _session_cwd(self, session: SessionInfo) -> Path | None:
+        """The session's launch cwd, scanned from the transcript (records carry `cwd`).
+
+        Anchors the worktree enumeration — any cwd inside the repo works, since
+        `git worktree list` returns every linked worktree. Best-effort: None if unfound.
+        """
+        with open(session.session_file) as f:
+            for _ in range(50):
+                line = f.readline()
+                if not line:
+                    break
+                if cwd := TranscriptRecord.model_validate_json(line).cwd:
+                    return Path(cwd)
+        return None
+
+    def _enumerate_worktrees(self, session_cwd: Path) -> Sequence[WorktreeStatus]:
+        """Every linked worktree's branch + status. Best-effort: empty if not a git repo.
+
+        Worktrees nest (linked trees live under the primary clone), so the session cwd is
+        attributed to its *deepest* containing worktree — the launch tree, not the parent.
+        """
+        porcelain = self._git(session_cwd, 'worktree', 'list', '--porcelain')
+        if not porcelain:
+            return []
+        blocks = [dict(self._parse_porcelain_block(b)) for b in porcelain.split('\n\n')]
+        blocks = [b for b in blocks if b.get('worktree')]
+        trunk = self._detect_trunk(session_cwd)
+        containers = [
+            b['worktree']
+            for b in blocks
+            if session_cwd == Path(b['worktree']) or Path(b['worktree']) in session_cwd.parents
+        ]
+        cwd_worktree = max(containers, key=len, default=None)
+
+        worktrees: list[WorktreeStatus] = []
+        for block in blocks:
+            path = block['worktree']
+            ahead = 0
+            if trunk:
+                count = self._git(path, 'rev-list', '--count', f'{trunk}..HEAD')
+                ahead = int(count) if count and count.isdigit() else 0
+            worktrees.append(
+                WorktreeStatus(
+                    path=path,
+                    branch=block['branch'].removeprefix('refs/heads/') if 'branch' in block else '(detached)',
+                    head_short=block.get('HEAD', '')[:8],
+                    dirty=bool(self._git(path, 'status', '--porcelain')),
+                    ahead_of_trunk=ahead,
+                    locked='locked' in block,
+                    is_session_cwd=(path == cwd_worktree),
+                    last_commit_subject=self._git(path, 'log', '-1', '--format=%s') or '',
+                )
+            )
+        return worktrees
+
+    def _worktree_details(self, session: SessionInfo, worktrees: Sequence[WorktreeStatus]) -> Sequence[WorktreeDetail]:
+        """Deep git state for the work-candidate tree(s); the session-cwd tree if none qualify.
+
+        Clean siblings are left out — only trees likely to own in-progress work get the
+        commit/status/stash dump. With no work candidate at all, the session-cwd tree is the
+        single best fallback to orient against.
+        """
+        targets = [w for w in worktrees if w.is_work_candidate] or [w for w in worktrees if w.is_session_cwd]
+        return [self._collect_detail(w, session.first_message_at) for w in targets]
+
+    def _collect_detail(self, worktree: WorktreeStatus, session_start: str | None) -> WorktreeDetail:
+        """One tree's commit window, working-tree status, diff-stat, and stashes."""
+        windowed = session_start is not None
+        log_args = (
+            ['log', '--oneline', f'--since={session_start}']
+            if windowed
+            else ['log', '--oneline', f'-{RECENT_COMMITS_SHOWN}']
+        )
+        commits = self._git(worktree.path, *log_args) or ''
+        status = self._git(worktree.path, 'status', '--short') or ''
+        diff_stat = self._git(worktree.path, 'diff', '--stat') or ''
+        stashes = self._git(worktree.path, 'stash', 'list') or ''
+        return WorktreeDetail(
+            path=worktree.path,
+            branch=worktree.branch,
+            recent_commits=commits.splitlines(),
+            commits_session_windowed=windowed,
+            status_short=status.splitlines(),
+            diff_stat=diff_stat.splitlines()[-1].strip() if diff_stat else '',
+            stashes=stashes.splitlines(),
+        )
+
+    def _detect_trunk(self, cwd: Path) -> str | None:
+        """The mainline branch for ahead-counts — local `main`/`master` if present."""
+        for ref in ('main', 'master'):
+            if self._git(cwd, 'rev-parse', '--verify', '--quiet', ref) is not None:
+                return ref
+        return None
+
+    @staticmethod
+    def _parse_porcelain_block(block: str) -> Iterator[tuple[str, str]]:
+        """Yield (key, value) for each line of a `git worktree list --porcelain` record."""
+        for line in block.splitlines():
+            if line.strip():
+                key, _, value = line.partition(' ')
+                yield key, value
+
     def _format_output(self, data: SessionData) -> str:
         """Format gathered data as structured text for the skill prompt."""
         lines: list[str] = []
@@ -381,6 +541,8 @@ class SessionGatherer:
         if s.first_message_at:
             lines.append(f'Started: {s.first_message_at}')
         lines.append('')
+
+        lines.extend(self._format_git_orientation(data))
 
         # Transcript
         lines.append('## Transcript')
@@ -494,6 +656,61 @@ class SessionGatherer:
         for fork in fork_direct:
             lines.append(f'- {fork.fork_name}: {len(fork.messages)} direct message(s)')
             lines.extend(f'    [{message.timestamp}] {message.text}' for message in fork.messages)
+        lines.append('')
+        return lines
+
+    def _format_git_orientation(self, data: SessionData) -> Sequence[str]:
+        """Deterministic git ground-truth: a worktree table, then deep detail for ★ trees."""
+        lines = ['## Git orientation']
+        if not data.worktrees:
+            lines.extend(['(no git worktrees — session cwd not in a repo)', ''])
+            return lines
+
+        if data.session_cwd:
+            lines.append(f'Session cwd: {data.session_cwd}')
+        lines.append(
+            '★ = likely holds in-progress work (dirty or ahead of trunk) — reconcile these against '
+            "the summary's claimed edits, and run the edit audit in the tree that owns them."
+        )
+        for w in data.worktrees:
+            marker = '★' if w.is_work_candidate else ' '
+            status_bits = ([f'+{w.ahead_of_trunk} ahead'] if w.ahead_of_trunk else []) + (['dirty'] if w.dirty else [])
+            flags = (['← session cwd'] if w.is_session_cwd else []) + (['locked'] if w.locked else [])
+            flag_str = f'  [{"; ".join(flags)}]' if flags else ''
+            status = ', '.join(status_bits) or 'clean'
+            lines.append(f'{marker} {w.branch} @{w.head_short}  {status}{flag_str}')
+            row = f'    {w.path}'
+            if w.is_work_candidate and w.last_commit_subject:
+                row += f'  — "{w.last_commit_subject}"'
+            lines.append(row)
+        lines.append('')
+
+        for detail in data.worktree_details:
+            lines.extend(self._format_worktree_detail(detail))
+        return lines
+
+    def _format_worktree_detail(self, detail: WorktreeDetail) -> Sequence[str]:
+        """One work-candidate tree's commits, working-tree status, diff-stat, and stashes."""
+        lines = [f'### {detail.branch} — {detail.path}']
+        if detail.commits_session_windowed:
+            header, empty = 'Commits since session start:', '  (no commits since session start)'
+        else:
+            header, empty = f'Recent commits (no session-start anchor; last {RECENT_COMMITS_SHOWN}):', '  (no commits)'
+        lines.append(header)
+        if detail.recent_commits:
+            lines.extend(f'  {c}' for c in detail.recent_commits)
+        else:
+            lines.append(empty)
+        if detail.diff_stat:
+            lines.append(f'Uncommitted: {detail.diff_stat}')
+        if detail.status_short:
+            lines.append('Working-tree status:')
+            lines.extend(f'  {s}' for s in detail.status_short)
+        else:
+            lines.append('Working tree: clean')
+        if detail.stashes:
+            lines.append('Stashes:')
+            lines.extend(f'  {s}' for s in detail.stashes)
         lines.append('')
         return lines
 
