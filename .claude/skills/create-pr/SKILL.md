@@ -37,6 +37,8 @@ Before drafting, get the *why*, not just the *what*:
 
 The git context (commits, files changed, existing-PR mode) is in the gathered output above. Do **not** draft until you understand why the change was made.
 
+**Mandate gate — find the user's intent, or halt.** The *why* must trace to an **affirmative user mandate**: a directive in the transcript, a filed issue/docket item, or an explicit in-session ask. A rationale you can reconstruct from the diff is **not** a mandate — *"I can justify this"* is not *"the user wanted this,"* and they diverge exactly when it's most dangerous: a plausible, well-described, unasked-for change. If the search turns up no mandate — only your own reasoning or the diff itself — **stop and ask before drafting** ("I can't find where you asked for this — is it intended?"). An origin you can't place is the strongest signal a change shouldn't ship. Doubly so when **codifying uncommitted work**: run `git log -- <files>` first — an uncommitted change that reverts a merged PR with no decision trail is a discard candidate, not a PR.
+
 ### Phase 2: Scratch file
 
 Drafts live in the repo-root `scratch/` (gitignored). Filename `pr-{descriptive-slug}.md` — match the topic, not a ticket. If a `pr-*.md` for this change already exists (listed above), reuse it.
