@@ -41,6 +41,26 @@ def test_human_text_drops_meta_and_scaffolding() -> None:
     assert human_text(wrapper) == ''
 
 
+def test_human_text_drops_cc_injected_fork_prompts() -> None:
+    """CC-injected fork spawn prompts (compaction / probe forks) are scaffolding, not user directives.
+
+    These reach a subagent transcript with origin=None and no `<` prefix, so only a content-prefix
+    filter catches them (a fork-name exclusion would wrongly drop a real directive that landed in a
+    compact-named fork).
+    """
+    compaction = TranscriptRecord.model_validate(
+        {
+            'type': 'user',
+            'message': {'content': 'Your task is to create a detailed summary of the conversation so far.'},
+        }
+    )
+    probe = TranscriptRecord.model_validate(
+        {'type': 'user', 'message': {'content': 'CRITICAL: Respond with TEXT ONLY, no tool calls.'}}
+    )
+    assert human_text(compaction) == ''
+    assert human_text(probe) == ''
+
+
 def test_queued_text_string_prompt() -> None:
     record = TranscriptRecord.model_validate(
         {'type': 'attachment', 'attachment': {'type': 'queued_command', 'prompt': 'queued ask'}}

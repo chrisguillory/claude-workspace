@@ -9,12 +9,12 @@ three ways, and a faithful spine captures all three:
 - a directive typed to a fork — a human message in a subagent transcript (``agent-*.jsonl``)
 
 Machine-relayed user records (origin kinds task-notification / auto-continuation / channel /
-coordinator / peer; 2.1.87+) and injected scaffolding (skill headers, local-command I/O,
-compaction summaries) are not directives, and are dropped.
+coordinator / peer; 2.1.87+) and injected scaffolding (skill headers, local-command I/O, compaction
+summaries, and Claude-Code-injected fork spawn prompts) are not directives, and are dropped.
 
-This is the single home for the filter — three skills (create-pr, recover-session, where-am-i)
-consume it. The drop-on-any-origin bug that motivated the consolidation is locked by a regression
-test: a 2.1.x ``origin.kind=='human'`` record must survive.
+This is the single home for the filter — create-pr and recover-session consume it; the where-am-i
+skill converges onto it once it lands. Regression-tested: a 2.1.x ``origin.kind=='human'`` record
+must survive, and CC-injected fork spawn prompts must not leak in.
 """
 
 from __future__ import annotations
@@ -57,6 +57,8 @@ SKIP_PREFIXES = (
     '[Request interrupted',
     'This session is being continued from a previous',
     'Base directory for this skill',
+    'Your task is to create a detailed summary of the conversation',  # CC compaction-fork spawn prompt
+    'CRITICAL: Respond with TEXT ONLY',  # CC probe-fork spawn prompt
 )
 
 
