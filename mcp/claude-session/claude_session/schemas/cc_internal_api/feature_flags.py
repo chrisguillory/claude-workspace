@@ -15,9 +15,9 @@ from collections.abc import Sequence
 from typing import Annotated, Literal, TypedDict
 
 import pydantic
+from cc_lib.schemas.base import EmptyDict
 
 from claude_session.schemas.cc_internal_api.base import StrictModel
-from claude_session.schemas.types import EmptyDict
 
 __all__ = [
     'KNOWN_FEATURE_FLAGS',

@@ -22,12 +22,15 @@ __all__ = [
     'CamelModel',
     'CamelSubsetModel',
     'ClosedModel',
+    'EmptyDict',
+    'EmptySequence',
     'OpenModel',
     'StrictModel',
     'SubsetModel',
 ]
 
-from typing import Any
+from collections.abc import Sequence
+from typing import Annotated, Any
 
 import pydantic
 from pydantic import GetCoreSchemaHandler
@@ -194,3 +197,44 @@ class CamelSubsetModel(SubsetModel):
     """
 
     model_config = pydantic.ConfigDict(alias_generator=to_camel)
+
+
+# -- Empty JSON Types ----------------------------------------------------------
+#
+# These types represent always-empty JSON structures observed in API traffic.
+# Using explicit types rather than inline constraints because:
+# 1. Pydantic can't validate against Never
+# 2. Named types document semantic meaning clearly
+# 3. Validation fails immediately if the API starts sending data
+# 4. Union with populated types works naturally
+#
+# Usage:
+#     sdk_params: EmptyDict       # Always {} - fails if API sends {"key": "value"}
+#     applied_edits: EmptySequence # Always [] - fails if API sends ["item"]
+#     previous_fields: DerivedFields | EmptyDict  # Sometimes empty, sometimes populated
+#
+# TODO: Analyze session models for EmptyDict opportunities - there may be
+# always-empty dict fields that should use EmptyDict for strictness.
+
+
+class EmptyDict(StrictModel):
+    """Marker type for empty JSON object {} in API traffic.
+
+    With extra='forbid', a model with no fields will only validate against
+    an empty dict. Used for fields that are always {} in observed captures.
+
+    Example:
+        sdk_params: EmptyDict  # Always {} in API traffic
+    """
+
+
+EmptySequence = Annotated[Sequence[Any], pydantic.Field(max_length=0)]
+"""
+Marker type for empty JSON array [] in API traffic.
+
+Used for fields that are always [] in observed captures.
+The element type (Any) doesn't matter since the sequence is always empty.
+
+Example:
+    applied_edits: EmptySequence  # Always [] in API traffic
+"""

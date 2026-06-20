@@ -650,6 +650,15 @@ Reference docs in `claude-docs/` are not auto-loaded into context. Read them whe
 | Empirical verification | `claude-docs/empirical-verification.md` |
 | Installing apps        | `claude-docs/app-installation.md`       |
 
+### Runtime data directories
+
+Beyond the repo tree, two HOME-level directories hold runtime state — owned separately:
+
+- **`~/.claude/`** — Claude Code's own (`sessions`, `projects/`, `debug/`). We read it; we never directly write here.
+- **`~/.claude-workspace/`** — ours, the workspace tooling layer. Everything our tools produce lives here: `sessions.json` (session tracker), the per-session MCP registry (`mcp/registry/{session_id}/`), login state, caches, context archives.
+
+Resolve each via `cc_lib.utils` — `get_claude_config_home_dir()` (Claude Code's) and `get_claude_workspace_config_home_dir()` (ours) — never a hardcoded `~/.claude*` literal. New code writing runtime state picks the home by who owns the data: if we produce it, it goes under `~/.claude-workspace/`.
+
 ## Architecture
 
 ### cc-lib Package Structure

@@ -21,9 +21,10 @@ from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal
 
 import pydantic
+from cc_lib.schemas.base import EmptyDict
 
 from claude_session.schemas.cc_internal_api.base import EmptyBody, StrictModel
-from claude_session.schemas.types import EmptyDict, PermissiveModel
+from claude_session.schemas.types import PermissiveModel
 
 __all__ = [
     'ActivatedConfigValue',

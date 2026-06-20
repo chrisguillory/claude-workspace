@@ -23,10 +23,11 @@ from collections.abc import Mapping, Sequence
 from typing import Literal
 
 import pydantic
+from cc_lib.schemas.base import EmptyDict
 
 from claude_session.schemas.cc_internal_api.base import StrictModel
 from claude_session.schemas.cc_internal_api.request import RequestMessage, SystemBlock, ThinkingConfig, ToolDefinition
-from claude_session.schemas.types import EmptyDict, ModelId
+from claude_session.schemas.types import ModelId
 
 __all__ = [
     'AccountSettingsResponse',

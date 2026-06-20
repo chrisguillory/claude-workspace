@@ -885,6 +885,9 @@ function resolveImagePathsForServe(html) {
 
 // Detect local image references in HTML (not data:, not http/https)
 function detectLocalImages(html) {
+  // Ignore <script> contents: inlined runtime bundles (--offline) contain <img>-like
+  // strings in their minified code that are not document images.
+  html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
   const localImages = [];
   const imgRegex = /<img\s[^>]*src="([^"]+)"/gi;
   let m;
