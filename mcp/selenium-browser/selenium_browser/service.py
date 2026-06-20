@@ -22,7 +22,9 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import fastmcp.exceptions
 import httpx
+from cc_lib.exceptions import MissingSystemDependency
 from cc_lib.schemas.base import SubsetModel
+from cc_lib.system_deps import require_binary
 from cc_lib.types import JsonObject
 from cc_lib.utils import Timer
 from selenium import webdriver
@@ -3176,7 +3178,7 @@ class BrowserService:
             Status dict confirming proxy configuration
 
         Requires:
-            mitmproxy must be installed: brew install mitmproxy (macOS) or pip install mitmproxy
+            the mitmdump binary on PATH (install the project toolchain: ./dotfiles/install.sh)
 
         Example:
             configure_proxy(
@@ -3211,6 +3213,11 @@ class BrowserService:
         upstream_auth = f'{username}:{password}'
 
         try:
+            require_binary('mitmdump', needed_for='upstream proxy capture')
+        except MissingSystemDependency as exc:
+            raise fastmcp.exceptions.ToolError(str(exc)) from exc
+
+        try:
             self.state.mitmproxy_process = subprocess.Popen(
                 [
                     'mitmdump',
@@ -3240,9 +3247,6 @@ class BrowserService:
 
             logger.info('mitmproxy started on localhost:8080')
 
-        except FileNotFoundError:
-            self.state.proxy_config = None
-            raise fastmcp.exceptions.ToolError('mitmproxy not found. Install with: pip install mitmproxy') from None
         except Exception as e:
             self.state.proxy_config = None
             if self.state.mitmproxy_process:

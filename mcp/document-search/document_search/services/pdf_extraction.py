@@ -23,6 +23,7 @@ from typing import Literal
 
 import fitz
 import pdfplumber
+from cc_lib.system_deps import require_binary
 
 __all__ = [
     'EncryptedPDFError',
@@ -152,6 +153,7 @@ def extract_pdf(path: str) -> PDFExtractionResult:
 
             # Try OCR for scanned pages
             if len(text.strip()) < PDF_OCR_CHAR_THRESHOLD and pdf_type in ('scanned', 'mixed'):
+                require_binary('tesseract', needed_for='OCR on scanned PDFs')
                 ocr_page = page.get_textpage_ocr(full=True)
                 text = ocr_page.extractText()
 

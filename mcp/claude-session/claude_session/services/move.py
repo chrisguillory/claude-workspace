@@ -22,7 +22,6 @@ from __future__ import annotations
 import logging
 import os
 import signal
-import subprocess
 import tempfile
 import time
 from collections.abc import Mapping, Sequence
@@ -37,6 +36,7 @@ from claude_session.exceptions import NativeSessionMoveError, SameProjectMoveErr
 from claude_session.schemas.operations.discovery import SessionInfo
 from claude_session.schemas.operations.move import MoveResult
 from claude_session.schemas.session import SessionRecord
+from claude_session.services._rg import run_rg
 from claude_session.services.archive import SessionArchiveService
 from claude_session.services.artifacts import (
     AgentFileInfo,
@@ -468,18 +468,12 @@ class SessionMoveService:
         agent_structure: dict[str, AgentStructure] = {}
 
         # Find agent files belonging to this session (both flat and nested)
-        result = subprocess.run(
-            [
-                'rg',
-                '--files-with-matches',
-                f'"sessionId":\\s*"{session_info.session_id}"',
-                '--glob',
-                '**/agent-*.jsonl',
-                str(session_dir),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
+        result = run_rg(
+            '--files-with-matches',
+            f'"sessionId":\\s*"{session_info.session_id}"',
+            '--glob',
+            '**/agent-*.jsonl',
+            str(session_dir),
         )
 
         if result.stdout.strip():
