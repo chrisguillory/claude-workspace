@@ -80,6 +80,7 @@ Principles describe the north star, not the minimum bar. New code embodies them;
 | **Tests earn their place**                    | Automated tests cover what empirical use can't — regressions and hard-to-stage edge cases. Happy-path coverage is redundant with manual end-to-end. |
 | **Ideal state over backwards compat**         | Dev-only repo — fix sources over workarounds; rename cleanly, no migration shims or doc-as-bandaid              |
 | **Fork or patch, don't wait**                 | Bleeding edge by default. Take the best from across forks and sister projects; patch what's missing; don't block on third-party release cadence. |
+| **Don't re-litigate what industry settled**   | Outside the repo's novel core, adopt the industry-standard tool; hand-rolling in a commodity domain needs an explicit "we want to iterate here" |
 | **Layered architecture**                      | Place each unit in the layer that owns its concern; trace symptoms to the layer that owns the cause; create a missing layer when duplication signals one |
 | **DI via closures**                           | FastMCP pattern for dependency injection                                                                       |
 
@@ -117,6 +118,18 @@ Already lived in this workspace:
 - **`mcp/claude-remote-audio/patches/`** (planned) — carries roc-toolkit patches against a pinned master SHA
 
 Extension of *Ideal state over backwards compat*: "fix the source" includes upstream libraries. "The source" might be a fork, multiple forks combined, or our own patches — whatever gets us to the right behavior fastest.
+
+### Don't re-litigate what industry settled
+
+**The repo's impetus is its novel core — the domains we've chosen to iterate on and codify. Everything else is commodity: adopt the industry answer.**
+
+The test, in order:
+
+1. Does anything else in this repo work this domain? If yes, it's core — *Fork or patch, don't wait* applies: patch, fork, combine, write the missing piece.
+2. If no, it's commodity. Adopt the settled tool with our config, even when a hand-roll looks smaller today — the hand-roll's hidden cost is rule/format maintenance in a domain we don't watch.
+3. Custom-building in a commodity domain requires an explicit decision to *start* iterating there — the user's "we want to work on this," never a session's convenience choice.
+
+The two principles are the same ecosystem-forward instinct with opposite defaults: inside the core, don't wait on the industry; outside it, don't compete with it.
 
 ### Layered architecture
 
@@ -505,7 +518,7 @@ Run pre-commit hooks before committing to catch linting/formatting issues:
 uv run pre-commit run --all-files || uv run pre-commit run --all-files
 ```
 
-Most hooks run via `uv`; one needs a system binary — [`pinact`](https://github.com/suzuki-shunsuke/pinact) (the GitHub Actions SHA-pinning hook): `brew install pinact`.
+Most hooks run via `uv`; one needs a system binary — [`pinact`](https://github.com/suzuki-shunsuke/pinact) (the GitHub Actions SHA-pinning hook), carried in `dotfiles/Brewfile` and converged by `bash dotfiles/install.sh`. The [`gitleaks`](https://github.com/gitleaks/gitleaks) secret-scan hook builds itself via pre-commit's golang toolchain on first run (no manual install); it scans the *staged diff*, so a full-tree audit is `gitleaks dir .` directly.
 
 The `||` retry handles auto-fixers (ruff format, trailing whitespace) that modify files on the first run. The second run verifies clean. If the second run fails, it's a real error.
 
@@ -625,6 +638,7 @@ Lists of comparable entries are alphabetically sorted unless there's a semantic 
 ├── configs/                    # Configuration templates
 ├── context/                    # Machine-local context layer — data gitignored
 │   └── granola/                # Granola meeting archive (data-only) — sync via /sync-granola-context
+├── dotfiles/                   # Shell environment: zsh config + Brewfile + install.sh (see dotfiles/README.md)
 └── claude-docs/                # Reference docs for Claude (not auto-loaded)
 ```
 
@@ -635,6 +649,15 @@ Reference docs in `claude-docs/` are not auto-loaded into context. Read them whe
 | Agentic workflows      | `claude-docs/agentic-workflows.md`      |
 | Empirical verification | `claude-docs/empirical-verification.md` |
 | Installing apps        | `claude-docs/app-installation.md`       |
+
+### Runtime data directories
+
+Beyond the repo tree, two HOME-level directories hold runtime state — owned separately:
+
+- **`~/.claude/`** — Claude Code's own (`sessions`, `projects/`, `debug/`). We read it; we never directly write here.
+- **`~/.claude-workspace/`** — ours, the workspace tooling layer. Everything our tools produce lives here: `sessions.json` (session tracker), the per-session MCP registry (`mcp/registry/{session_id}/`), login state, caches, context archives.
+
+Resolve each via `cc_lib.utils` — `get_claude_config_home_dir()` (Claude Code's) and `get_claude_workspace_config_home_dir()` (ours) — never a hardcoded `~/.claude*` literal. New code writing runtime state picks the home by who owns the data: if we produce it, it goes under `~/.claude-workspace/`.
 
 ## Architecture
 

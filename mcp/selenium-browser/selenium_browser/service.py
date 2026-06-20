@@ -22,7 +22,9 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import fastmcp.exceptions
 import httpx
+from cc_lib.exceptions import MissingSystemDependency
 from cc_lib.schemas.base import SubsetModel
+from cc_lib.system_deps import require_binary
 from cc_lib.types import JsonObject
 from cc_lib.utils import Timer
 from selenium import webdriver
@@ -956,7 +958,8 @@ class BrowserService:
                     text: text.substring(0, 100),
                     selector: selector,
                     cursor: style.cursor,
-                    href: el.href || null,
+                    // el.href is an SVGAnimatedString on SVG nodes (not a string); coerce to string|null
+                    href: typeof el.href === 'string' ? el.href : (el.href && el.href.baseVal) || el.getAttribute('href') || null,
                     classes: el.getAttribute('class') || ''
                 });
             });
@@ -3175,7 +3178,7 @@ class BrowserService:
             Status dict confirming proxy configuration
 
         Requires:
-            mitmproxy must be installed: brew install mitmproxy (macOS) or pip install mitmproxy
+            the mitmdump binary on PATH (install the project toolchain: ./dotfiles/install.sh)
 
         Example:
             configure_proxy(
@@ -3188,6 +3191,12 @@ class BrowserService:
             navigate(url, fresh_browser=True)  # Gets NEW IP from proxy pool
         """
         logger.info('Configuring proxy via mitmproxy: %s:%s', host, port)
+
+        # Fail before tearing down any existing browser/proxy state.
+        try:
+            require_binary('mitmdump', needed_for='upstream proxy capture')
+        except MissingSystemDependency as exc:
+            raise fastmcp.exceptions.ToolError(str(exc)) from exc
 
         # Close existing browser and mitmproxy
         await self.close_browser()
@@ -3239,9 +3248,6 @@ class BrowserService:
 
             logger.info('mitmproxy started on localhost:8080')
 
-        except FileNotFoundError:
-            self.state.proxy_config = None
-            raise fastmcp.exceptions.ToolError('mitmproxy not found. Install with: pip install mitmproxy') from None
         except Exception as e:
             self.state.proxy_config = None
             if self.state.mitmproxy_process:

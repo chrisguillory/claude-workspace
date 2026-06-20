@@ -7,7 +7,6 @@ archive creation, compression, and format detection.
 from __future__ import annotations
 
 import logging
-import subprocess
 from collections.abc import Mapping, Sequence, Set
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,6 +34,7 @@ from claude_session.schemas.operations.archive import (
     parse_agent_metadata,
 )
 from claude_session.schemas.session import SessionRecord, Task
+from claude_session.services._rg import run_rg
 from claude_session.services.artifacts import (
     collect_agent_metadata,
     collect_debug_log,
@@ -540,12 +540,7 @@ class SessionArchiveService:
         # Search both flat (project_folder/) and nested (project_folder/<sid>/subagents/)
         # Note: JSON may have optional space after colon, so we use regex pattern
         pattern = f'"sessionId":\\s*"{self.session_id}"'
-        result = subprocess.run(
-            ['rg', '--files-with-matches', pattern, '--glob', '**/agent-*.jsonl', str(project_folder)],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        result = run_rg('--files-with-matches', pattern, '--glob', '**/agent-*.jsonl', str(project_folder))
 
         agent_files = []
         if result.stdout.strip():

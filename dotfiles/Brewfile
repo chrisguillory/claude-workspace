@@ -1,0 +1,27 @@
+# Mesh-wide toolchain manifest. install.sh converges each machine to it
+# (missing-only, no upgrades) — adding a line here = everywhere on its next run.
+
+# Shell environment layer (hooked by zsh/.zshrc and .mise.toml)
+brew "direnv"
+brew "mise"
+brew "uv"
+
+# Node.js development
+brew "node"
+brew "pnpm"
+brew "yarn"
+
+# Developer toolchain
+brew "gh"
+brew "ripgrep"
+brew "tmux"
+
+# Repo toolchain (pre-commit hooks that need a system binary)
+brew "pinact"
+
+# MCP-server runtime deps
+brew "snappy"           # selenium-browser: dfindexeddb's snappy C library
+brew "tesseract"        # document-search: PDF OCR
+cask "chromium"         # selenium-browser default browser
+cask "docker-desktop"   # document-search: Qdrant + Redis. Update via `docker desktop update` (auto_updates cask — brew won't)
+cask "mitmproxy"        # selenium-browser proxy; claude-session traffic capture (migrated core→cask)

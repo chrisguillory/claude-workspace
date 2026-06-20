@@ -8,6 +8,7 @@ CCLibError                                # base for all cc_lib exceptions
 │   ├── MultipleActiveSessionsForPidError # multiple sessions claim the same claude_pid
 │   └── MissingEnvVarError                # expected env var not set
 ├── HookTreeMismatchError                 # hook tree != CLAUDE_EXEC_LAUNCH_DIR/hooks
+├── MissingSystemDependency               # required external binary not on PATH
 └── RivalSessionError                     # another live claude process owns this session_id
 """
 
@@ -24,6 +25,7 @@ __all__ = [
     'HookTreeMismatchError',
     'InactiveSessionError',
     'MissingEnvVarError',
+    'MissingSystemDependency',
     'MultipleActiveSessionsForPidError',
     'RivalSessionError',
     'SessionNotFoundError',
@@ -79,6 +81,19 @@ class HookTreeMismatchError(PickleByInitArgs, CCLibError):
             f'hook at {actual} does not match CLAUDE_EXEC_LAUNCH_DIR/hooks ({expected}). '
             f'Hooks are wired to a different tree than CLAUDE_EXEC_LAUNCH_DIR points to.'
         )
+
+
+class MissingSystemDependency(PickleByInitArgs, CCLibError):
+    """A required external binary is not on PATH.
+
+    Carries the binary name, what needed it, and an actionable install remedy.
+    """
+
+    def __init__(self, binary: str, *, needed_for: str, install_hint: str) -> None:
+        self.binary = binary
+        self.needed_for = needed_for
+        self.install_hint = install_hint
+        super().__init__(f"'{binary}' not found on PATH — needed for {needed_for}. {install_hint}")
 
 
 class RivalSessionError(PickleByInitArgs, CCLibError):

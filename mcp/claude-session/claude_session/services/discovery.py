@@ -6,7 +6,6 @@ Provides utilities to discover sessions by ID and list all available sessions.
 from __future__ import annotations
 
 import json
-import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -14,6 +13,7 @@ from cc_lib.utils import get_claude_config_home_dir
 
 from claude_session.exceptions import AmbiguousSessionError
 from claude_session.schemas.operations.discovery import SessionInfo
+from claude_session.services._rg import run_rg
 
 __all__ = [
     'SessionDiscoveryService',
@@ -55,12 +55,7 @@ class SessionDiscoveryService:
 
         # Use rg to find session files matching the ID/prefix
         # Use wildcard pattern to support prefix matching
-        result = subprocess.run(
-            ['rg', '--files', '--glob', f'{session_id_or_prefix}*.jsonl', str(search_dir)],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        result = run_rg('--files', '--glob', f'{session_id_or_prefix}*.jsonl', str(search_dir))
 
         if not result.stdout.strip():
             return None

@@ -4,13 +4,9 @@ Browser automation with CDP stealth injection to bypass Cloudflare bot detection
 
 ## Prerequisites (macOS)
 
-**Complete these steps before Setup.** The `dfindexeddb` dependency requires the snappy compression library:
+**Complete this before Setup.** `dfindexeddb` builds against the snappy library (from `dotfiles/Brewfile`), so sync with its Homebrew paths:
 
 ```bash
-# 1. Install snappy via Homebrew
-brew install snappy
-
-# 2. Sync dependencies (flags required for Homebrew paths)
 cd /path/to/claude-workspace/mcp/selenium-browser
 CPPFLAGS="-I/opt/homebrew/include" LDFLAGS="-L/opt/homebrew/lib" uv sync
 ```
@@ -851,7 +847,6 @@ for item in items_to_search:
 
 ### Requirements
 
-- **mitmproxy**: Install with `brew install mitmproxy` (macOS) or `pip install mitmproxy`
 - **Proxy credentials**: Bright Data or similar residential proxy service
 
 ### Bright Data Specifics
