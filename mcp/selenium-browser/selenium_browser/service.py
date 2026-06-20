@@ -3192,6 +3192,12 @@ class BrowserService:
         """
         logger.info('Configuring proxy via mitmproxy: %s:%s', host, port)
 
+        # Fail before tearing down any existing browser/proxy state.
+        try:
+            require_binary('mitmdump', needed_for='upstream proxy capture')
+        except MissingSystemDependency as exc:
+            raise fastmcp.exceptions.ToolError(str(exc)) from exc
+
         # Close existing browser and mitmproxy
         await self.close_browser()
 
@@ -3211,11 +3217,6 @@ class BrowserService:
         # mitmproxy handles auth with Bright Data, Chrome connects to localhost:8080
         upstream_url = f'http://{host}:{port}'
         upstream_auth = f'{username}:{password}'
-
-        try:
-            require_binary('mitmdump', needed_for='upstream proxy capture')
-        except MissingSystemDependency as exc:
-            raise fastmcp.exceptions.ToolError(str(exc)) from exc
 
         try:
             self.state.mitmproxy_process = subprocess.Popen(
