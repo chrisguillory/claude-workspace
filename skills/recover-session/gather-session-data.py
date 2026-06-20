@@ -71,12 +71,13 @@ import re
 import subprocess
 import sys
 from collections import defaultdict
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 import pydantic
 from cc_lib import ErrorBoundary
 from cc_lib.schemas.base import ClosedModel, SubsetModel
+from cc_lib.transcript_spine import TranscriptRecord, fork_transcripts, human_text, is_relayed, parent_relayed
 from document_search.schemas.indexing import IndexingResult
 from pydantic import BaseModel
 
@@ -84,80 +85,13 @@ from pydantic import BaseModel
 # Constants
 # ---------------------------------------------------------------------------
 
-RELAY_TOOLS = ('SendMessage', 'Agent', 'Task')
-MATCH_PREFIX = 110  # chars compared when matching a fork message against parent-relayed text
 STALE_FORK_MIN_RECORDS = 10  # orphan size below which a late live sibling is not flagged
 MIN_REPORTED_ORPHAN_RECORDS = 5  # smaller orphans without user messages roll up into a count
 MESSAGE_PREVIEW_CHARS = 240
 BRANCH_MESSAGE_CAP = 10
 RECENT_COMMITS_SHOWN = 10  # `git log --oneline -N` depth in the deep detail for work-candidate trees
 
-# ---------------------------------------------------------------------------
-# Transcript-record vocabulary (subset of the JSONL we read; extras ignored)
-# ---------------------------------------------------------------------------
-
-
-class RecordOrigin(SubsetModel):
-    """Message origin metadata (Claude Code 2.1.87+); presence ⇒ machine-relayed, not human.
-
-    Subset of ``UserRecordOrigin``; ``kind`` is widened from the full Literal to ``str`` so
-    a novel origin kind is read, not rejected.
-
-    >>> # noinspection PyUnresolvedReferences
-    >>> from claude_session.schemas.session.models import UserRecordOrigin
-    """
-
-    kind: str
-
-
-class ContentBlock(SubsetModel):
-    """One block of a message's content array (text / tool_use / thinking / image / ...).
-
-    Subset of the content-block union; reads only the ``text`` and ``tool_use`` fields and
-    keeps ``input`` untyped (the full per-tool input models are the fragile shape we skip).
-
-    >>> # noinspection PyUnresolvedReferences
-    >>> from claude_session.schemas.session.models import TextContent, ToolUseContent
-    """
-
-    type: str
-    text: str | None = None
-    name: str | None = None
-    input: Mapping[str, object] | None = None
-
-
-class RecordMessage(SubsetModel):
-    """A record's message envelope; subset of ``Message``. ``content`` is a block list or a bare string.
-
-    >>> # noinspection PyUnresolvedReferences
-    >>> from claude_session.schemas.session.models import Message
-    """
-
-    content: Sequence[ContentBlock] | str = ()
-
-
-class TranscriptRecord(SubsetModel):
-    """The tree-walkable subset of a session record.
-
-    Fields from ``BaseRecord`` (uuid/timestamp/type/cwd) and ``UserRecord`` (parentUuid/isMeta/
-    origin/message; assistant records share the chain fields).
-
-    ``uuid`` is None on summary/snapshot/queue records; ``parentUuid`` is None at chain
-    roots (compaction restarts); ``origin``/``message`` are absent on non-message records;
-    ``cwd`` is the launch directory, present on message/event records.
-
-    >>> # noinspection PyUnresolvedReferences
-    >>> from claude_session.schemas.session.models import BaseRecord, UserRecord
-    """
-
-    type: str
-    uuid: str | None = None
-    parentUuid: str | None = None
-    timestamp: str = ''
-    isMeta: bool | None = None
-    origin: RecordOrigin | None = None
-    message: RecordMessage | None = None
-    cwd: str | None = None
+# Transcript records + the human/queued/fork directive filter come from cc_lib.transcript_spine.
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +297,7 @@ class SessionGatherer:
         print('Parsing transcript (subset schema) and analyzing record tree...', file=sys.stderr)
         records, parse_failures = _parse_records(transcript)
         tree = _analyze_tree(records)
-        fork_paths = _fork_transcripts(session_dir)
+        fork_paths = fork_transcripts(session_dir)
         fork_direct, fork_failures = _fork_direct_messages(records, fork_paths)
 
         # Git ground-truth (fast, deterministic) — every worktree's branch + status, plus
@@ -747,23 +681,6 @@ def _parse_records(path: Path) -> tuple[Sequence[TranscriptRecord], Mapping[str,
     return records, dict(failures)
 
 
-def _human_text(record: TranscriptRecord) -> str:
-    """Human-typed text of a user record; '' for anything synthetic.
-
-    Machine-relayed messages carry ``origin`` (task-notification, auto-continuation,
-    channel, coordinator, peer; Claude Code 2.1.87+); older injected wrappers are filtered
-    by prefix.
-    """
-    if record.type != 'user' or record.isMeta or record.origin is not None or record.message is None:
-        return ''
-    content = record.message.content
-    text = content if isinstance(content, str) else '\n'.join(b.text or '' for b in content if b.type == 'text')
-    text = text.strip()
-    if not text or text.startswith(('<', 'Caveat:', '[Request interrupted')):
-        return ''
-    return text
-
-
 # ---------------------------------------------------------------------------
 # Private helpers — main-transcript tree analysis
 # ---------------------------------------------------------------------------
@@ -817,7 +734,7 @@ def _analyze_tree(records: Sequence[TranscriptRecord]) -> TreeAnalysis | None:
             messages = [
                 UserMessage(timestamp=nodes[u].timestamp, text=_preview(text))
                 for u in branch
-                if (text := _human_text(nodes[u]))
+                if (text := human_text(nodes[u]))
             ]
             if not messages and len(branch) < MIN_REPORTED_ORPHAN_RECORDS:
                 micro_count += 1
@@ -867,21 +784,13 @@ def _collect_subtree(root: str, children: Mapping[str, Sequence[str]]) -> Sequen
 # ---------------------------------------------------------------------------
 
 
-def _fork_transcripts(session_dir: Path) -> Sequence[Path]:
-    paths: list[Path] = []
-    for directory in (session_dir, session_dir / 'subagents'):
-        if directory.is_dir():
-            paths.extend(directory.glob('agent-*.jsonl'))
-    return sorted(set(paths))
-
-
 def _fork_direct_messages(
     main_records: Sequence[TranscriptRecord], fork_paths: Sequence[Path]
 ) -> tuple[Sequence[ForkDirect], Mapping[str, int]]:
     """User messages typed directly to forks: not the spawn boilerplate, not parent-relayed."""
     if not fork_paths:
         return [], {}
-    relayed = _parent_relayed(main_records)
+    relayed = parent_relayed(main_records)
 
     results: list[ForkDirect] = []
     failures: defaultdict[str, int] = defaultdict(int)
@@ -893,34 +802,11 @@ def _fork_direct_messages(
         direct = [
             UserMessage(timestamp=record.timestamp, text=_preview(text))
             for record in fork_records
-            if (text := _human_text(record)) and '<fork-boilerplate>' not in text and not _is_relayed(text, relayed)
+            if (text := human_text(record)) and not is_relayed(text, relayed)
         ]
         if direct:
             results.append(ForkDirect(fork_name=name, messages=direct))
     return results, dict(failures)
-
-
-def _parent_relayed(records: Sequence[TranscriptRecord]) -> Sequence[str]:
-    """Normalized text of every directive the parent relayed (SendMessage / Agent / Task tool calls)."""
-    relayed: list[str] = []
-    for record in records:
-        content = record.message.content if record.message else None
-        if not isinstance(content, Sequence) or isinstance(content, str):
-            continue
-        for block in content:
-            if block.type != 'tool_use' or block.name not in RELAY_TOOLS or block.input is None:
-                continue
-            for key in ('content', 'message', 'prompt'):
-                value = block.input.get(key)
-                if isinstance(value, str) and len(value) > 30:
-                    relayed.append(_normalize(value))
-    return relayed
-
-
-def _is_relayed(text: str, relayed: Iterable[str]) -> bool:
-    normalized = _normalize(text)
-    head = normalized[:MATCH_PREFIX]
-    return any(head in candidate or candidate[:MATCH_PREFIX] in normalized for candidate in relayed)
 
 
 # ---------------------------------------------------------------------------
@@ -931,10 +817,6 @@ def _is_relayed(text: str, relayed: Iterable[str]) -> bool:
 def _preview(text: str) -> str:
     flattened = re.sub(r'\s+', ' ', text).strip()
     return flattened[:MESSAGE_PREVIEW_CHARS] + ('…' if len(flattened) > MESSAGE_PREVIEW_CHARS else '')
-
-
-def _normalize(text: str) -> str:
-    return re.sub(r'\s+', ' ', text).strip().lower()
 
 
 if __name__ == '__main__':
