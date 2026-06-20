@@ -183,7 +183,7 @@ Patches (alphabetical by name):
                     (``{flag}&&{resp}&&`` → ``{verbose}&&{resp}&&``), and the
                     "(ctrl+o to expand)" hint (``!{flag}&&`` → ``!{verbose}&&``);
                     the verbose tree then follows the verbose param directly.
-                    Anchor: ``eo.createElement(wbp,{progressMessages:t,tools:n,verbose:r})``
+                    Anchor: ``eo.createElement(ZCp,{progressMessages:t,tools:n,verbose:r})``
                     (the verbose-tree React element invocation — interior
                     fragment that's stable across the substitution, so
                     patcher status detection works post-apply).
@@ -222,6 +222,24 @@ Empirical verification on 2.1.128 (2026-05-06)::
       original "Tool use rejected" bug no longer exists
 
 Version Log::
+
+    2.1.183 (2026-06-20)
+        Two releases since 2.1.181 (2.1.182-183), same Bun 1.4 minifier — only
+        identifiers drifted. No changelog entry touches a live patch (2.1.183's
+        auto-mode git/destroy guards and model-deprecation warnings are unrelated)
+        — no obsoletions.
+
+        Patch updates:
+        - force-429-retry-header / force-429-retry-status: subscriber-gate
+          identifiers re-minified Co/oXe → Ro/TXe. 1 site each, applied.
+        - hook-ask-no-override: clean apply (anchor + bytes stable since 2.1.109).
+          1 site.
+        - scratchpad: accessor re-minified ut → ct; gate shape and the
+          isArtifactToolEnabled anchor unchanged. 1 site.
+        - show-subagent-prompt-tools-response: component identifiers re-minified
+          (module eo and control flag s / verbose r all stable; wbp→ZCp, qn→Gn,
+          X2t→g$t, LOt→iLt, jio→Gao, xY→jY, Vge→a_e, ix→cx). Strategy unchanged
+          (4-site s→r). 1 site.
 
     2.1.181 (2026-06-18)
         Eight releases since 2.1.172 (2.1.173-181). The 2.1.181 build upgraded the
@@ -679,10 +697,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FIX,
         anchor=b'"x-should-retry"',
-        old=b't==="true"&&(!Co()||oXe())',
-        new=b't==="true"&&(!0/*Co|oXe*/)',
+        old=b't==="true"&&(!Ro()||TXe())',
+        new=b't==="true"&&(!0/*Ro|TXe*/)',
         window=200,
-        min_version=CCVersion('2.1.181'),
+        min_version=CCVersion('2.1.183'),
     ),
     PatchDef(
         name='force-429-retry-status',
@@ -697,10 +715,10 @@ PATCHES: Sequence[PatchDef] = (
         ),
         kind=PatchKind.FIX,
         anchor=b'"x-should-retry"',
-        old=b'if(e.status===429)return!Co()||oXe();',
-        new=b'if(e.status===429)return!0;/*Co|oXe*/',
+        old=b'if(e.status===429)return!Ro()||TXe();',
+        new=b'if(e.status===429)return!0;/*Ro|TXe*/',
         window=600,
-        min_version=CCVersion('2.1.181'),
+        min_version=CCVersion('2.1.183'),
     ),
     PatchDef(
         name='hook-ask-no-override',
@@ -717,36 +735,36 @@ PATCHES: Sequence[PatchDef] = (
         description='Enable session-scoped scratchpad directory with auto-permissions',
         kind=PatchKind.FEATURE,
         anchor=b'isArtifactToolEnabled',
-        old=b'ut("tengu_scratch",!1)',
+        old=b'ct("tengu_scratch",!1)',
         new=b'!0/*scratch_force_on*/',
         window=80,
-        min_version=CCVersion('2.1.181'),
+        min_version=CCVersion('2.1.183'),
     ),
     PatchDef(
         name='show-subagent-prompt-tools-response',
         description='Expand completed subagent to show prompt, tool calls, and response when verbose=true',
         kind=PatchKind.VISIBILITY,
-        anchor=b'eo.createElement(wbp,{progressMessages:t,tools:n,verbose:r})',
+        anchor=b'eo.createElement(ZCp,{progressMessages:t,tools:n,verbose:r})',
         old=(
-            b's&&p&&eo.createElement(qn,null,eo.createElement(X2t,{prompt:p,theme:o})),'
-            b's?eo.createElement(LOt,null,eo.createElement(wbp,{progressMessages:t,tools:n,verbose:r})):null,'
-            b's&&d&&d.length>0&&eo.createElement(qn,null,eo.createElement(jio,{content:d,theme:o})),'
-            b'eo.createElement(qn,{height:1},eo.createElement(xY,{message:A,lookups:Vge,addMargin:!1,tools:n,'
+            b's&&p&&eo.createElement(Gn,null,eo.createElement(g$t,{prompt:p,theme:o})),'
+            b's?eo.createElement(iLt,null,eo.createElement(ZCp,{progressMessages:t,tools:n,verbose:r})):null,'
+            b's&&d&&d.length>0&&eo.createElement(Gn,null,eo.createElement(Gao,{content:d,theme:o})),'
+            b'eo.createElement(Gn,{height:1},eo.createElement(jY,{message:A,lookups:a_e,addMargin:!1,tools:n,'
             b'commands:[],verbose:r,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!s&&eo.createElement(w,{dimColor:!0},"  ",eo.createElement(ix,null)))'
+            b'!s&&eo.createElement(w,{dimColor:!0},"  ",eo.createElement(cx,null)))'
         ),
         new=(
-            b'r&&p&&eo.createElement(qn,null,eo.createElement(X2t,{prompt:p,theme:o})),'
-            b'r?eo.createElement(LOt,null,eo.createElement(wbp,{progressMessages:t,tools:n,verbose:r})):null,'
-            b'r&&d&&d.length>0&&eo.createElement(qn,null,eo.createElement(jio,{content:d,theme:o})),'
-            b'eo.createElement(qn,{height:1},eo.createElement(xY,{message:A,lookups:Vge,addMargin:!1,tools:n,'
+            b'r&&p&&eo.createElement(Gn,null,eo.createElement(g$t,{prompt:p,theme:o})),'
+            b'r?eo.createElement(iLt,null,eo.createElement(ZCp,{progressMessages:t,tools:n,verbose:r})):null,'
+            b'r&&d&&d.length>0&&eo.createElement(Gn,null,eo.createElement(Gao,{content:d,theme:o})),'
+            b'eo.createElement(Gn,{height:1},eo.createElement(jY,{message:A,lookups:a_e,addMargin:!1,tools:n,'
             b'commands:[],verbose:r,inProgressToolUseIDs:new Set,progressMessagesForMessage:[],shouldAnimate:!1,'
             b'shouldShowDot:!1,isTranscriptMode:!1,isStatic:!0})),'
-            b'!r&&eo.createElement(w,{dimColor:!0},"  ",eo.createElement(ix,null)))'
+            b'!r&&eo.createElement(w,{dimColor:!0},"  ",eo.createElement(cx,null)))'
         ),
         window=800,
-        min_version=CCVersion('2.1.181'),
+        min_version=CCVersion('2.1.183'),
     ),
 )
 
