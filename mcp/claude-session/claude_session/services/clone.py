@@ -7,7 +7,6 @@ Faster than archive+restore for local cloning operations.
 from __future__ import annotations
 
 import logging
-import subprocess
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,6 +19,7 @@ from claude_session.schemas.operations.discovery import SessionInfo
 from claude_session.schemas.operations.restore import RestoreResult
 from claude_session.schemas.session import CustomTitleRecord, SessionRecord
 from claude_session.schemas.session.models import validate_session_record
+from claude_session.services._rg import run_rg
 from claude_session.services.artifacts import (
     AgentStructure,
     agent_dest_path,
@@ -548,18 +548,12 @@ class SessionCloneService:
 
         # Find agent files belonging to this session
         # Searches both flat and nested (subagents/) locations
-        result = subprocess.run(
-            [
-                'rg',
-                '--files-with-matches',
-                f'"sessionId":\\s*"{session_info.session_id}"',
-                '--glob',
-                '**/agent-*.jsonl',  # Recursive glob for subagents/
-                str(session_dir),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
+        result = run_rg(
+            '--files-with-matches',
+            f'"sessionId":\\s*"{session_info.session_id}"',
+            '--glob',
+            '**/agent-*.jsonl',  # Recursive glob for subagents/
+            str(session_dir),
         )
 
         # Detect structure (flat / nested / workflow-nested) for each agent file

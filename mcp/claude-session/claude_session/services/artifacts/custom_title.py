@@ -18,11 +18,11 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from claude_session.schemas.session import AiTitleRecord, CustomTitleRecord, SessionRecord
+from claude_session.services._rg import run_rg
 
 __all__ = [
     'CLONE_SUFFIX_PATTERN',
@@ -141,12 +141,7 @@ def extract_custom_title_from_file(session_file: Path) -> str | None:
         return None
 
     # Use rg to find lines containing title records (custom or AI-generated)
-    result = subprocess.run(
-        ['rg', '--no-filename', '-e', '"type":"custom-title"', '-e', '"type":"ai-title"', str(session_file)],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    result = run_rg('--no-filename', '-e', '"type":"custom-title"', '-e', '"type":"ai-title"', str(session_file))
 
     if not result.stdout.strip():
         return None
