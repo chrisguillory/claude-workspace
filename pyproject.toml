@@ -219,16 +219,16 @@ filterwarnings = [
 
 [dependency-groups]
 dev = [
-    "anthropic>=0.75.0",
+    "anthropic>=0.109.1",
     "bashlex",
-    "gitpython>=3.1",
+    "gitpython>=3.1.50",
     "lazy-object-proxy>=1.12.0",
     "mypy>=1.19.1",
-    "pandas-stubs>=3.0.0.260204",
-    "pre-commit>=4.5.1",
-    "pydantic>=2.12.5", # Required for pydantic.mypy plugin
-    "pymupdf-stubs>=1.26.1.post1",
-    "pytest>=9.0.2",
+    "pandas-stubs>=3.0.3.260530",
+    "pre-commit>=4.6.0",
+    "pydantic>=2.13.4", # Required for pydantic.mypy plugin
+    "pymupdf-stubs>=1.27.2.2.post2",
+    "pytest>=9.0.3",
     # >=1.4.0: 1.3.0's _temporary_event_loop_policy captured the "current" loop via
     # asyncio.get_event_loop() to restore after each async test. On Python 3.13 that
     # call fabricates a _UnixSelectorEventLoop (+ AF_UNIX socketpair self-pipe) when
@@ -238,9 +238,9 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "pytest-mypy-plugins>=3.3.0",
     "pytest-xdist>=3.8.0",
-    "ruff>=0.14.10",
-    "typer>=0.9.0",
-    "types-psutil>=7.2.1.20251231",
+    "ruff>=0.15.17",
+    "typer>=0.26.7",
+    "types-psutil>=7.2.2.20260518",
     "types-pyyaml>=6.0.12.20250915",
     "zizmor>=1.25.2",
 ]
