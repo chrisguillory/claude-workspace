@@ -11,12 +11,10 @@
 # cc-lib = { path = "../../../cc-lib/", editable = true }
 # document-search = { path = "../../../mcp/document-search/", editable = true }
 # ///
-"""Gather PR context + index the session for the create-pr skill.
+"""Gather PR context for the create-pr skill.
 
-Collects git/GitHub context and indexes the session transcript for semantic
-search, then emits structured text for the skill prompt. Tailored for
-chrisguillory/claude-workspace; drafts follow the repo's CLAUDE.md PR
-guidelines.
+Git/GitHub state, the verbatim user-intent spine (via cc_lib.transcript_spine — the mandate
+gate's source of record), and a semantic index of the session, emitted as text for the skill prompt.
 
 Usage: gather-pr-context.py [BASE_BRANCH]   (BASE_BRANCH defaults to 'main')
 """
@@ -26,11 +24,14 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
 from cc_lib.error_boundary import ErrorBoundary
 from cc_lib.schemas.base import SubsetModel
+from cc_lib.transcript_spine import extract_spine
 from document_search.schemas.indexing import IndexingResult
 
 
@@ -49,6 +50,7 @@ class SessionInfo(SubsetModel):
     session_id: str
     session_file: str
     project_path: str
+    parent_id: str | None = None  # predecessor generation, if this session continues one (surfaced, not folded)
 
 
 class PRContext(SubsetModel):
@@ -61,6 +63,9 @@ class PRContext(SubsetModel):
     files_changed: str
     scratch_files: Sequence[str]
     session_id: str | None
+    parent_id: str | None
+    spine_path: str | None
+    spine_summary: str
     session_indexed: bool
     session_chunks: int
 
@@ -91,7 +96,10 @@ class PRContextGatherer:
         commits = self._git('log', f'{self._base}..HEAD', '--oneline').splitlines()
         files_changed = self._git('diff', f'{self._base}...HEAD', '--stat')
         scratch_files = self._find_scratch_files()
-        session_id, session_chunks = self._index_session()
+
+        session = self._resolve_session()
+        spine_path, spine_summary = self._write_spine(session) if session else (None, '')
+        session_chunks = self._index_session(session) if session else 0
 
         ctx = PRContext(
             branch=branch,
@@ -100,7 +108,10 @@ class PRContextGatherer:
             commits=commits,
             files_changed=files_changed,
             scratch_files=scratch_files,
-            session_id=session_id,
+            session_id=session.session_id if session else None,
+            parent_id=session.parent_id if session else None,
+            spine_path=spine_path,
+            spine_summary=spine_summary,
             session_indexed=session_chunks > 0,
             session_chunks=session_chunks,
         )
@@ -127,12 +138,8 @@ class PRContextGatherer:
             return []
         return sorted(f.name for f in scratch_dir.glob('pr-*.md'))
 
-    def _index_session(self) -> tuple[str | None, int]:
-        """Index the session transcript + directory. Returns (session_id, total chunks).
-
-        Degrades gracefully: a failed index (e.g. a transient embedding-provider
-        overload) is surfaced on stderr and reported as 0 chunks, never silently.
-        """
+    def _resolve_session(self) -> SessionInfo | None:
+        """Resolve the invoking session via the canonical claude-session info resolver."""
         result = subprocess.run(
             ['claude-session', 'info', '--format', 'json'],
             capture_output=True,
@@ -140,10 +147,39 @@ class PRContextGatherer:
             check=False,
         )
         if result.returncode != 0:
-            print('claude-session info failed — session indexing skipped', file=sys.stderr)
-            return None, 0
+            print('claude-session info failed — spine + indexing skipped', file=sys.stderr)
+            return None
+        return SessionInfo.model_validate(json.loads(result.stdout))
 
-        session = SessionInfo.model_validate(json.loads(result.stdout))
+    def _write_spine(self, session: SessionInfo) -> tuple[str | None, str]:
+        """Write this session's user-intent spine (cc_lib.transcript_spine) to a machine-local file.
+
+        Returns (path, summary) — summary e.g. '153 directives (147 user, 6 queued)'; (None, '') if unreadable.
+        """
+        transcript = Path(session.session_file)
+        if not transcript.is_file():
+            print(f'transcript not found at {transcript} — spine skipped', file=sys.stderr)
+            return None, ''
+
+        entries = extract_spine(transcript)
+        lines = [
+            f'[{i}] {entry.timestamp}{"" if entry.source == "user" else f" ({entry.source})"}\n{entry.text}\n'
+            for i, entry in enumerate(entries, 1)
+        ]
+        staging = Path(tempfile.mkdtemp(prefix='create-pr-spine-'))
+        dst = staging / 'user-intent-spine.txt'
+        dst.write_text('\n'.join(lines))
+
+        counts = Counter('fork' if entry.source.startswith('fork:') else entry.source for entry in entries)
+        parts = ', '.join(f'{counts[kind]} {kind}' for kind in ('user', 'queued', 'fork') if counts[kind])
+        return str(dst), f'{len(entries)} directives ({parts})' if entries else '0 directives'
+
+    def _index_session(self, session: SessionInfo) -> int:
+        """Index the transcript + directory for semantic enrichment. Returns total chunks.
+
+        Degrades gracefully: a failed index (e.g. a transient embedding-provider
+        overload) is surfaced on stderr and reported as 0 chunks, never silently.
+        """
         transcript = Path(session.session_file)
         session_dir = transcript.parent / session.session_id
 
@@ -160,10 +196,10 @@ class PRContextGatherer:
         )
         if result.returncode != 0:
             print(f'Index failed (search the prior index instead): {result.stderr.strip()[:200]}', file=sys.stderr)
-            return session.session_id, 0
+            return 0
 
         idx = IndexingResult.model_validate(json.loads(result.stdout))
-        return session.session_id, idx.chunks_created + idx.chunks_skipped
+        return idx.chunks_created + idx.chunks_skipped
 
     def _format_output(self, ctx: PRContext) -> str:
         lines: list[str] = []
@@ -181,6 +217,25 @@ class PRContextGatherer:
             lines.append(f'Session: {ctx.session_id}')
         lines.append('')
 
+        lines.append('## User-intent spine (mandate source of record)')
+        lines.append('')
+        if ctx.spine_path:
+            lines.append(f'{ctx.spine_summary} → {ctx.spine_path}')
+            lines.append(
+                'Phase 1 reads the mandate from this, not from semantic search. Hand the spine + the diff to '
+                'an agent (it can be long — let the agent read all of it); it returns the directive(s) this '
+                'change folds into, or none.'
+            )
+            if ctx.parent_id:
+                lines.append(
+                    f'NOTE: this session continues a predecessor ({ctx.parent_id}) — a *different* session, '
+                    'NOT in this spine. If the mandate seems to predate this session, surface it and let the '
+                    'user decide whether to fold the predecessor in; never auto-include it.'
+                )
+        else:
+            lines.append('(spine unavailable — session unresolved; establish the mandate from this conversation)')
+        lines.append('')
+
         lines.append(f'## Commits ({len(ctx.commits)})')
         lines.append('')
         lines.extend(f'  {c}' for c in ctx.commits[:30])
@@ -193,11 +248,12 @@ class PRContextGatherer:
         lines.append(ctx.files_changed)
         lines.append('')
 
-        lines.append('## Session')
+        lines.append('## Session (semantic enrichment)')
         if ctx.session_indexed:
             lines.append(f'Indexed: {ctx.session_chunks} chunks (transcript + session directory)')
             lines.append(
-                'Search via mcp__document-search__search_documents (collection "document-chunks") for decisions, feedback, research.'
+                'Search via mcp__document-search__search_documents (collection "document-chunks") for the '
+                'decisions and research behind the change — beyond the bare ask in the spine.'
             )
         else:
             lines.append(
