@@ -7,7 +7,7 @@ user-invocable: true
 disable-model-invocation: false
 effort: max
 allowed-tools:
-  - "Bash(~/.claude/skills/recover-session/gather-session-data.py:*)"
+  - 'Bash("$(realpath "${CLAUDE_SKILL_DIR}/gather-session-data.py")":*)'
 ---
 
 # Recover Session: Index, Search, Reconstruct
@@ -18,7 +18,7 @@ arc through targeted queries.
 
 ## Session data (auto-gathered and indexed)
 
-!`~/.claude/skills/recover-session/gather-session-data.py $ARGUMENTS`
+!`"$(realpath "${CLAUDE_SKILL_DIR}/gather-session-data.py")" $ARGUMENTS`
 
 ## Instructions
 
