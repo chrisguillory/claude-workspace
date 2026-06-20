@@ -331,6 +331,12 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   or model IDs; TeamCreate/TeamDelete tools removed upstream (2.1.178) but historical
                   records retained; DesignSync is an MCP-style claude.ai tool, not a CC built-in.
                   Extended CLAUDE_CODE_MAX_VERSION to 2.1.181.
+- Schema v0.2.45: Claude Code 2.1.183. MAX-only bump — binary-proven no new session-schema
+                  surface across 2.1.181-2.1.183 (identical built-in tool, model-ID, and
+                  system-subtype sets; 2.1.182 is a notes-less point release, 2.1.183 is
+                  behavioral/TUI/bugfix — the lone JSONL-adjacent item, scheduled-task/webhook
+                  deliveries reclassed as task notifications, maps to the existing
+                  UserRecordOrigin.kind=task-notification). Extended CLAUDE_CODE_MAX_VERSION to 2.1.183.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -687,9 +693,9 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.44'
+SCHEMA_VERSION = '0.2.45'
 CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
-CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.181')
+CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.183')
 
 
 # -- Base Configuration --------------------------------------------------------
