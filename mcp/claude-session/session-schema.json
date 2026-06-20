@@ -1283,11 +1283,12 @@
           "anyOf": [
             {
               "enum": [
-                "rate_limit",
-                "unknown",
-                "invalid_request",
                 "authentication_failed",
-                "server_error"
+                "invalid_request",
+                "model_not_found",
+                "rate_limit",
+                "server_error",
+                "unknown"
               ],
               "type": "string"
             },
@@ -13705,6 +13706,6 @@
   "x-schema-version": "0.2.44",
   "x-claude-code-compatibility": {
     "min": "2.0.35",
-    "max": "2.1.172"
+    "max": "2.1.181"
   }
 }

@@ -324,8 +324,13 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   FallbackContent message block ({type:fallback, from{model}, to{model}};
                   server_fallback stream events are never persisted). UsageIteration gained
                   type fallback_message and a per-iteration model field.
-                  frame-link routing key removed upstream (was never modeled). Extended
-                  CLAUDE_CODE_MAX_VERSION to 2.1.172.
+                  frame-link routing key removed upstream (was never modeled).
+                  AssistantRecord.error += model_not_found (404 model-unavailable API error;
+                  producer present ≤2.1.172, a latent baseline gap surfaced empirically by a
+                  2.1.173 session). Verified 2.1.173-2.1.181 schema-light: no new records, tools,
+                  or model IDs; TeamCreate/TeamDelete tools removed upstream (2.1.178) but historical
+                  records retained; DesignSync is an MCP-style claude.ai tool, not a CC built-in.
+                  Extended CLAUDE_CODE_MAX_VERSION to 2.1.181.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -683,7 +688,7 @@ __all__ = [
 
 SCHEMA_VERSION = '0.2.44'
 CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
-CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.172')
+CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.181')
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -2999,9 +3004,10 @@ class AssistantRecord(BaseRecord):
     apiError: Literal['max_output_tokens'] | None = pydantic.Field(
         None, description='API error code (Claude Code 2.1.15+)'
     )
-    error: Literal['rate_limit', 'unknown', 'invalid_request', 'authentication_failed', 'server_error'] | None = (
-        pydantic.Field(None, description='Error type for API error messages')
-    )
+    error: (
+        Literal['authentication_failed', 'invalid_request', 'model_not_found', 'rate_limit', 'server_error', 'unknown']
+        | None
+    ) = pydantic.Field(None, description='Error type for API error messages')  # last updated ≤2.1.172
     slug: str | None = pydantic.Field(None, description='Human-readable session slug (Claude Code 2.0.51+)')
     entrypoint: str | None = pydantic.Field(None, description='Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)')
     teamName: str | None = pydantic.Field(None, description='Team name when running in multi-agent team mode')
