@@ -13703,9 +13703,9 @@
   "$id": "https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json",
   "title": "Claude Code Session Record",
   "description": "Complete schema for Claude Code session JSONL records",
-  "x-schema-version": "0.2.44",
+  "x-schema-version": "0.2.45",
   "x-claude-code-compatibility": {
     "min": "2.0.35",
-    "max": "2.1.181"
+    "max": "2.1.183"
   }
 }

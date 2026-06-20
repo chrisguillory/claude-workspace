@@ -10,7 +10,6 @@ import getpass
 import json
 import mmap
 import socket
-import subprocess
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +26,7 @@ from claude_session.schemas.operations.lineage import (
     LineageTree,
     LineageTreeNode,
 )
+from claude_session.services._rg import run_rg
 
 __all__ = [
     'LineageService',
@@ -345,12 +345,7 @@ class LineageService:
 
         # Single rg call with glob alternatives: {id1,id2,...}.jsonl
         glob_pattern = '{' + ','.join(session_ids) + '}.jsonl'
-        result = subprocess.run(
-            ['rg', '--files', '--glob', glob_pattern, str(claude_projects)],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        result = run_rg('--files', '--glob', glob_pattern, str(claude_projects))
 
         if not result.stdout.strip():
             return {}

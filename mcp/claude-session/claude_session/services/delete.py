@@ -28,7 +28,6 @@ import json
 import logging
 import os
 import signal
-import subprocess
 import time
 import uuid
 from collections.abc import AsyncGenerator, Mapping, Sequence, Set
@@ -47,6 +46,7 @@ from claude_session.exceptions import (
 )
 from claude_session.schemas.operations.archive import SessionArchive
 from claude_session.schemas.operations.delete import ArtifactFile, DeleteManifest, DeleteResult
+from claude_session.services._rg import run_rg
 from claude_session.services.archive import SessionArchiveService
 from claude_session.services.artifacts import (
     ToolResultCollection,
@@ -199,18 +199,8 @@ class SessionDeleteService:
         )
 
         # 2. Find agent files
-        result = subprocess.run(
-            [
-                'rg',
-                '--files-with-matches',
-                f'"sessionId":\\s*"{session_id}"',
-                '--glob',
-                'agent-*.jsonl',
-                str(session_dir),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
+        result = run_rg(
+            '--files-with-matches', f'"sessionId":\\s*"{session_id}"', '--glob', 'agent-*.jsonl', str(session_dir)
         )
 
         if result.stdout.strip():
