@@ -92,16 +92,21 @@ class QueuedCommand(SubsetModel):
 
 
 class TranscriptRecord(SubsetModel):
-    """The subset of a transcript record's fields that decide whether it carries a user directive."""
+    """A Claude Code transcript record — the shared subset every spine/recovery consumer reads.
+
+    Directive fields (type/isMeta/origin/message/attachment + timestamp) drive spine extraction;
+    the tree/launch fields (uuid/parentUuid/cwd) serve recover-session's fork-and-orphan analysis.
+    """
 
     type: str | None = None
     uuid: str | None = None
     parentUuid: str | None = None  # noqa: N815 — wire field; recover-session walks the uuid→parentUuid tree
-    timestamp: str | None = None
+    timestamp: str = ''  # present on every message/event record; '' only on the rare timestamp-less record
     isMeta: bool | None = None  # noqa: N815 — wire field name (Claude Code camelCase)
     origin: Origin | None = None  # kind=='human' ⇒ user; other kinds ⇒ machine-relayed (CC 2.1.x+)
     message: Message | None = None
     attachment: QueuedCommand | None = None
+    cwd: str | None = None  # launch directory (BaseRecord.cwd); recover-session anchors worktree enumeration on it
 
 
 class SpineEntry(ClosedModel):
