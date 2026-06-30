@@ -25,7 +25,9 @@ Usage:
 Prerequisites:
     1. Navigate to github.com in Chromium via Selenium MCP with profile state
     2. save_profile_state("~/.claude-workspace/scripts/gh_upload_session.json")
-    3. Session cookies last ~2 weeks. Re-save if uploads start failing (422).
+    3. A 422 on upload means the session expired — re-save it then. There's no
+       fixed lifetime to track: GitHub's remember-me cookie re-mints the session
+       on use, so a months-old save often still authenticates.
 
 Uploads are permanent — user-attachments have no delete API. Check content
 (PII, secrets) before uploading.
