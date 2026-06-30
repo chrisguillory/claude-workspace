@@ -337,6 +337,19 @@ CLAUDE CODE VERSION COMPATIBILITY:
                   behavioral/TUI/bugfix — the lone JSONL-adjacent item, scheduled-task/webhook
                   deliveries reclassed as task notifications, maps to the existing
                   UserRecordOrigin.kind=task-notification). Extended CLAUDE_CODE_MAX_VERSION to 2.1.183.
+- Schema v0.2.46: Claude Code 2.1.195. Eight binary-proven additions; the entire session-schema
+                  delta landed by 2.1.193 (2.1.194-195 added only the non-session billing/RBAC/audit
+                  API surface). UserRecord += toolEndsTurn (bool; tool result ends the turn) and
+                  toolDenialKind (automode-blocked|automode-parsing-error|automode-unavailable|
+                  permission-rule|user-rejected -- auto-mode denial reasons persisted to the transcript).
+                  promptSource += suggestion_accepted (autocomplete-accept path). QueuedCommandAttachment
+                  += timestamp. New attachment subtypes context_tip ({tip}) and selected_lines_in_diff
+                  ({lineCount, content} -- IDE diff-view selection, sibling of selected_lines_in_ide).
+                  ModelRefusalNoFallbackSystemRecord (subtype model_refusal_no_fallback: refusal with no
+                  fallback available -- the refusal sibling minus fallback machinery, plus
+                  refusedUserMessageUuid), which was also added to the existing model_refusal_fallback
+                  record. Excluded as non-session producers: set_mcp_permission_mode_override (bridge RPC),
+                  pause-memory (slash command). Extended CLAUDE_CODE_MAX_VERSION to 2.1.195.
 - If validation fails, Claude Code schema may have changed - update models accordingly
 
 NEW FIELDS IN CLAUDE CODE 2.0.51+ (Schema v0.1.3):
@@ -463,6 +476,7 @@ __all__ = [
     'ContentReplacement',
     'ContentReplacementRecord',
     'ContextManagement',
+    'ContextTipAttachment',
     'CronCreateToolInput',
     'CronCreateToolResult',
     'CronDeleteToolInput',
@@ -551,6 +565,7 @@ __all__ = [
     'MicrocompactMetadata',
     'ModelFallbackSystemRecord',
     'ModelRefusalFallbackSystemRecord',
+    'ModelRefusalNoFallbackSystemRecord',
     'MonitorToolInput',
     'NestedMemoryAttachment',
     'NestedMemoryContent',
@@ -596,6 +611,7 @@ __all__ = [
     'ScheduleWakeupToolInput',
     'ScheduledTaskFireSystemRecord',
     'SearchResultsReceivedData',
+    'SelectedLinesInDiffAttachment',
     'SelectedLinesInIdeAttachment',
     'SendMessageControl',
     'SendMessageLegacyToolInput',
@@ -693,9 +709,9 @@ __all__ = [
 
 # -- Schema Version ------------------------------------------------------------
 
-SCHEMA_VERSION = '0.2.45'
+SCHEMA_VERSION = '0.2.46'
 CLAUDE_CODE_MIN_VERSION = CCVersion('2.0.35')
-CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.183')
+CLAUDE_CODE_MAX_VERSION = CCVersion('2.1.195')
 
 
 # -- Base Configuration --------------------------------------------------------
@@ -2940,6 +2956,19 @@ class UserRecord(BaseRecord):
         | None,
         pydantic.Field(union_mode='left_to_right'),
     ] = None  # Tool execution metadata (validated left-to-right)
+    toolDenialKind: (
+        Literal[
+            'automode-blocked', 'automode-parsing-error', 'automode-unavailable', 'permission-rule', 'user-rejected'
+        ]
+        | None
+    ) = pydantic.Field(
+        None,
+        description='Why a tool was denied — auto-mode classifier denials + permission-rule (Claude Code 2.1.193+).',
+    )  # last updated 2.1.193
+    toolEndsTurn: bool | None = pydantic.Field(
+        None,
+        description='Tool result ends the turn; replaces the prose "end your response" instruction (Claude Code 2.1.193+).',
+    )
     todos: Sequence[TodoItem] | None = pydantic.Field(None, description='Todo list state (Claude Code 2.0.47+)')
     slug: str | None = pydantic.Field(None, description='Human-readable session slug (Claude Code 2.0.51+)')
     imagePasteIds: Sequence[int] | None = pydantic.Field(None, description='IDs of pasted images in this message')
@@ -2959,11 +2988,11 @@ class UserRecord(BaseRecord):
         None, description='MCP tool structured content metadata (Claude Code 2.1.19+)'
     )
     promptId: str | None = pydantic.Field(None, description='Prompt identifier (Claude Code 2.1.74+)')
-    promptSource: Literal['queued', 'sdk', 'system', 'typed'] | None = pydantic.Field(
+    promptSource: Literal['queued', 'sdk', 'suggestion_accepted', 'system', 'typed'] | None = pydantic.Field(
         None,
         description="Prompt origin (Claude Code 2.1.161+): non-interactive→'sdk', isMeta→'system', "
-        "queued-replay→'queued', else 'typed'.",
-    )
+        "queued-replay→'queued', autocomplete-accept→'suggestion_accepted' (2.1.193+), else 'typed'.",
+    )  # last updated 2.1.193
     entrypoint: str | None = pydantic.Field(None, description='Client entrypoint (e.g., "cli") (Claude Code 2.1.80+)')
     teamName: str | None = pydantic.Field(None, description='Team name when running in multi-agent team mode')
     agentName: str | None = pydantic.Field(None, description='Agent name within team (may be absent for lead agent)')
@@ -3365,6 +3394,7 @@ class ModelRefusalFallbackSystemRecord(BaseRecord):
     apiRefusalCategory: str | None = None
     apiRefusalExplanation: str | None = None
     retractedMessageUuids: Sequence[str] | None = None  # Second write site only (refusal-retract path)
+    refusedUserMessageUuid: str | None = None  # Refused user message's uuid (Claude Code 2.1.193+)
     isMeta: bool
     isSidechain: bool
     userType: str
@@ -3408,6 +3438,39 @@ class ModelFallbackSystemRecord(BaseRecord):
     agentName: str | None = None
 
 
+class ModelRefusalNoFallbackSystemRecord(BaseRecord):
+    """System record for an API-side model refusal with no fallback available (subtype=model_refusal_no_fallback).
+
+    Binary yields ``{type:"system",subtype:"model_refusal_no_fallback",content:"",level:"warning",
+    originalModel,requestId,apiRefusalCategory,apiRefusalExplanation,refusedUserMessageUuid,isMeta}`` --
+    the refusal sibling of ModelRefusalFallbackSystemRecord minus the fallback machinery
+    (no direction/trigger/fallbackModel/retractedMessageUuids), plus refusedUserMessageUuid.
+    Producer present 2.1.193+.
+    """
+
+    type: Literal['system']
+    cwd: PathField
+    parentUuid: str | None
+    subtype: Literal['model_refusal_no_fallback']
+    content: str
+    level: Literal['warning']
+    originalModel: str
+    requestId: str | None = None
+    apiRefusalCategory: str | None = None
+    apiRefusalExplanation: str | None = None
+    refusedUserMessageUuid: str | None = None
+    isMeta: bool
+    isSidechain: bool
+    userType: str
+    version: CCVersionStrField
+    gitBranch: str
+    slug: str | None = None
+    entrypoint: str | None = None
+    agentId: str | None = None
+    teamName: str | None = None
+    agentName: str | None = None
+
+
 # Union of system subtype records
 SystemSubtypeRecord = Annotated[
     LocalCommandSystemRecord
@@ -3422,6 +3485,7 @@ SystemSubtypeRecord = Annotated[
     | AwaySummarySystemRecord
     | AgentsKilledSystemRecord
     | ModelRefusalFallbackSystemRecord
+    | ModelRefusalNoFallbackSystemRecord
     | ModelFallbackSystemRecord,
     pydantic.Field(discriminator='subtype'),
 ]
@@ -4044,6 +4108,9 @@ class QueuedCommandAttachment(StrictModel):
     origin: UserRecordOrigin | None = pydantic.Field(
         None, description='Queued-command origin (Claude Code 2.1.157+); see UserRecordOrigin for the kind set.'
     )
+    timestamp: str | None = pydantic.Field(
+        None, description='Queue insertion time carried onto the attachment (Claude Code 2.1.186+).'
+    )
 
 
 class DynamicSkillAttachment(StrictModel):
@@ -4176,6 +4243,27 @@ class SelectedLinesInIdeAttachment(StrictModel):
     filename: PathField
     content: str
     displayPath: str
+
+
+class SelectedLinesInDiffAttachment(StrictModel):
+    """Lines selected in an IDE diff view; sibling of selected_lines_in_ide (Claude Code 2.1.193+).
+
+    Write site present since 2.1.193 but currently DORMANT: as of 2.1.195 no shipping IDE plugin
+    or CLI populates selection.source='diff' (the selection_changed receive-schema drops 'source'),
+    so this attachment is not yet emitted. Modeled ahead per binary-proven tracking of write sites
+    — ready the instant an IDE+CLI light up the diff-selection path.
+    """
+
+    type: Literal['selected_lines_in_diff']
+    lineCount: int
+    content: str
+
+
+class ContextTipAttachment(StrictModel):
+    """Context tip injected into the conversation (Claude Code 2.1.193+)."""
+
+    type: Literal['context_tip']
+    tip: str
 
 
 class DiagnosticPosition(StrictModel):
@@ -4345,6 +4433,8 @@ AttachmentData = Annotated[
     | EditedTextFileAttachment
     | OpenedFileInIdeAttachment
     | SelectedLinesInIdeAttachment
+    | SelectedLinesInDiffAttachment
+    | ContextTipAttachment
     | DiagnosticsAttachment
     | PlanFileReferenceAttachment
     | PlanModeAttachment
@@ -4405,6 +4495,7 @@ SessionRecord = Annotated[
     | AwaySummarySystemRecord  # Must be before SystemRecord!
     | AgentsKilledSystemRecord  # Must be before SystemRecord!
     | ModelRefusalFallbackSystemRecord  # Must be before SystemRecord!
+    | ModelRefusalNoFallbackSystemRecord  # Must be before SystemRecord!
     | ModelFallbackSystemRecord  # Must be before SystemRecord!
     | SystemRecord
     | FileHistorySnapshotRecord
