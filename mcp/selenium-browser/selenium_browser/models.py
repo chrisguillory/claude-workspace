@@ -215,6 +215,7 @@ class ChromeLocalState(OpenModel):
     legacy: JsonObject | None = None
     local: JsonObject | None = None
     management: JsonObject | None = None
+    media: JsonObject | None = None  # Media device/stream state (e.g., audio_input_stream_last_*)
     network_time: JsonObject | None = None
     optimization_guide: JsonObject | None = None
     origin_trials: JsonObject | None = None
