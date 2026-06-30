@@ -11,7 +11,7 @@ dependencies = [
     "httpx",
     "cc-lib",
     "pycryptodome>=3.23.0",
-    "pydantic>=2.0.0",
+    "pydantic>=2.13.4",
     "pyyaml",
     "selenium",
     "uvicorn>=0.38.0",
