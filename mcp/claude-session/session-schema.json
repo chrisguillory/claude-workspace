@@ -1662,6 +1662,7 @@
               "command_permissions": "#/$defs/CommandPermissionsAttachment",
               "compact_file_reference": "#/$defs/CompactFileReferenceAttachment",
               "companion_intro": "#/$defs/CompanionIntroAttachment",
+              "context_tip": "#/$defs/ContextTipAttachment",
               "date_change": "#/$defs/DateChangeAttachment",
               "deferred_tools_delta": "#/$defs/DeferredToolsDeltaAttachment",
               "diagnostics": "#/$defs/DiagnosticsAttachment",
@@ -1682,6 +1683,7 @@
               "plan_mode_exit": "#/$defs/PlanModeExitAttachment",
               "plan_mode_reentry": "#/$defs/PlanModeReentryAttachment",
               "queued_command": "#/$defs/QueuedCommandAttachment",
+              "selected_lines_in_diff": "#/$defs/SelectedLinesInDiffAttachment",
               "selected_lines_in_ide": "#/$defs/SelectedLinesInIdeAttachment",
               "skill_listing": "#/$defs/SkillListingAttachment",
               "task_reminder": "#/$defs/TaskReminderAttachment",
@@ -1751,6 +1753,12 @@
             },
             {
               "$ref": "#/$defs/SelectedLinesInIdeAttachment"
+            },
+            {
+              "$ref": "#/$defs/SelectedLinesInDiffAttachment"
+            },
+            {
+              "$ref": "#/$defs/ContextTipAttachment"
             },
             {
               "$ref": "#/$defs/DiagnosticsAttachment"
@@ -3561,6 +3569,27 @@
         "applied_edits"
       ],
       "title": "ContextManagement",
+      "type": "object"
+    },
+    "ContextTipAttachment": {
+      "additionalProperties": false,
+      "description": "Context tip injected into the conversation (Claude Code 2.1.193+).",
+      "properties": {
+        "type": {
+          "const": "context_tip",
+          "title": "Type",
+          "type": "string"
+        },
+        "tip": {
+          "title": "Tip",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "tip"
+      ],
+      "title": "ContextTipAttachment",
       "type": "object"
     },
     "CronCreateToolInput": {
@@ -7464,6 +7493,18 @@
           "default": null,
           "title": "Retractedmessageuuids"
         },
+        "refusedUserMessageUuid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Refusedusermessageuuid"
+        },
         "isMeta": {
           "title": "Ismeta",
           "type": "boolean"
@@ -7565,6 +7606,231 @@
         "gitBranch"
       ],
       "title": "ModelRefusalFallbackSystemRecord",
+      "type": "object"
+    },
+    "ModelRefusalNoFallbackSystemRecord": {
+      "additionalProperties": false,
+      "description": "System record for an API-side model refusal with no fallback available (subtype=model_refusal_no_fallback).\n\nBinary yields ``{type:\"system\",subtype:\"model_refusal_no_fallback\",content:\"\",level:\"warning\",\noriginalModel,requestId,apiRefusalCategory,apiRefusalExplanation,refusedUserMessageUuid,isMeta}`` --\nthe refusal sibling of ModelRefusalFallbackSystemRecord minus the fallback machinery\n(no direction/trigger/fallbackModel/retractedMessageUuids), plus refusedUserMessageUuid.\nProducer present 2.1.193+.",
+      "properties": {
+        "type": {
+          "const": "system",
+          "title": "Type",
+          "type": "string"
+        },
+        "uuid": {
+          "title": "Uuid",
+          "type": "string"
+        },
+        "timestamp": {
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        },
+        "forkedFrom": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sessionKind": {
+          "anyOf": [
+            {
+              "const": "bg",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sessionkind"
+        },
+        "cwd": {
+          "$ref": "#/$defs/PathField"
+        },
+        "parentUuid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parentuuid"
+        },
+        "subtype": {
+          "const": "model_refusal_no_fallback",
+          "title": "Subtype",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "level": {
+          "const": "warning",
+          "title": "Level",
+          "type": "string"
+        },
+        "originalModel": {
+          "title": "Originalmodel",
+          "type": "string"
+        },
+        "requestId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requestid"
+        },
+        "apiRefusalCategory": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Apirefusalcategory"
+        },
+        "apiRefusalExplanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Apirefusalexplanation"
+        },
+        "refusedUserMessageUuid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Refusedusermessageuuid"
+        },
+        "isMeta": {
+          "title": "Ismeta",
+          "type": "boolean"
+        },
+        "isSidechain": {
+          "title": "Issidechain",
+          "type": "boolean"
+        },
+        "userType": {
+          "title": "Usertype",
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/CCVersionStrField"
+        },
+        "gitBranch": {
+          "title": "Gitbranch",
+          "type": "string"
+        },
+        "slug": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Slug"
+        },
+        "entrypoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entrypoint"
+        },
+        "agentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agentid"
+        },
+        "teamName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Teamname"
+        },
+        "agentName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agentname"
+        }
+      },
+      "required": [
+        "type",
+        "uuid",
+        "timestamp",
+        "sessionId",
+        "cwd",
+        "parentUuid",
+        "subtype",
+        "content",
+        "level",
+        "originalModel",
+        "isMeta",
+        "isSidechain",
+        "userType",
+        "version",
+        "gitBranch"
+      ],
+      "title": "ModelRefusalNoFallbackSystemRecord",
       "type": "object"
     },
     "MonitorToolInput": {
@@ -8690,6 +8956,19 @@
           ],
           "default": null,
           "description": "Queued-command origin (Claude Code 2.1.157+); see UserRecordOrigin for the kind set."
+        },
+        "timestamp": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Queue insertion time carried onto the attachment (Claude Code 2.1.186+).",
+          "title": "Timestamp"
         }
       },
       "required": [
@@ -9371,6 +9650,32 @@
         "query"
       ],
       "title": "SearchResultsReceivedData",
+      "type": "object"
+    },
+    "SelectedLinesInDiffAttachment": {
+      "additionalProperties": false,
+      "description": "Lines selected in an IDE diff view; sibling of selected_lines_in_ide (Claude Code 2.1.193+).\n\nWrite site present since 2.1.193 but currently DORMANT: as of 2.1.195 no shipping IDE plugin\nor CLI populates selection.source='diff' (the selection_changed receive-schema drops 'source'),\nso this attachment is not yet emitted. Modeled ahead per binary-proven tracking of write sites\n\u2014 ready the instant an IDE+CLI light up the diff-selection path.",
+      "properties": {
+        "type": {
+          "const": "selected_lines_in_diff",
+          "title": "Type",
+          "type": "string"
+        },
+        "lineCount": {
+          "title": "Linecount",
+          "type": "integer"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "lineCount",
+        "content"
+      ],
+      "title": "SelectedLinesInDiffAttachment",
       "type": "object"
     },
     "SelectedLinesInIdeAttachment": {
@@ -12805,6 +13110,39 @@
           "default": null,
           "title": "Tooluseresult"
         },
+        "toolDenialKind": {
+          "anyOf": [
+            {
+              "enum": [
+                "automode-blocked",
+                "automode-parsing-error",
+                "automode-unavailable",
+                "permission-rule",
+                "user-rejected"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why a tool was denied \u2014 auto-mode classifier denials + permission-rule (Claude Code 2.1.193+).",
+          "title": "Tooldenialkind"
+        },
+        "toolEndsTurn": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tool result ends the turn; replaces the prose \"end your response\" instruction (Claude Code 2.1.193+).",
+          "title": "Toolendsturn"
+        },
         "todos": {
           "anyOf": [
             {
@@ -12940,6 +13278,7 @@
               "enum": [
                 "queued",
                 "sdk",
+                "suggestion_accepted",
                 "system",
                 "typed"
               ],
@@ -12950,7 +13289,7 @@
             }
           ],
           "default": null,
-          "description": "Prompt origin (Claude Code 2.1.161+): non-interactive\u2192'sdk', isMeta\u2192'system', queued-replay\u2192'queued', else 'typed'.",
+          "description": "Prompt origin (Claude Code 2.1.161+): non-interactive\u2192'sdk', isMeta\u2192'system', queued-replay\u2192'queued', autocomplete-accept\u2192'suggestion_accepted' (2.1.193+), else 'typed'.",
           "title": "Promptsource"
         },
         "entrypoint": {
@@ -13627,6 +13966,9 @@
       "$ref": "#/$defs/ModelRefusalFallbackSystemRecord"
     },
     {
+      "$ref": "#/$defs/ModelRefusalNoFallbackSystemRecord"
+    },
+    {
       "$ref": "#/$defs/ModelFallbackSystemRecord"
     },
     {
@@ -13703,9 +14045,9 @@
   "$id": "https://github.com/chrisguillory/claude-workspace/mcp/claude-session/session-schema.json",
   "title": "Claude Code Session Record",
   "description": "Complete schema for Claude Code session JSONL records",
-  "x-schema-version": "0.2.45",
+  "x-schema-version": "0.2.46",
   "x-claude-code-compatibility": {
     "min": "2.0.35",
-    "max": "2.1.183"
+    "max": "2.1.195"
   }
 }
