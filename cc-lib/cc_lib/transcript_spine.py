@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -59,7 +59,11 @@ SKIP_PREFIXES = (
     'Base directory for this skill',
     'Your task is to create a detailed summary of the conversation',  # CC compaction-fork spawn prompt
     'CRITICAL: Respond with TEXT ONLY',  # CC probe-fork spawn prompt
+    '[SUGGESTION MODE',  # CC autocomplete-fork spawn prompt
 )
+# CC fork prompts whose entire message is a fixed token — unsafe as a prefix (would drop a real
+# "Warmup the cache" directive), so matched exactly instead.
+SKIP_EXACT: Set[str] = {'Warmup'}  # CC cache-warmup fork
 
 
 class Origin(ClosedModel):
@@ -243,7 +247,7 @@ def _is_human(origin: Origin | None) -> bool:
 
 def _clean(text: str) -> str:
     text = text.strip()
-    return '' if not text or text.startswith(SKIP_PREFIXES) else text
+    return '' if not text or text in SKIP_EXACT or text.startswith(SKIP_PREFIXES) else text
 
 
 def _normalize(text: str) -> str:

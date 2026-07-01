@@ -133,3 +133,21 @@ def test_extract_spine_dedups_queued_already_seen_as_turn(tmp_path: Path) -> Non
     transcript.write_text('\n'.join(json.dumps(record) for record in records))
     texts = [entry.text for entry in extract_spine(transcript, include_forks=False)]
     assert texts == ['same ask']
+
+
+def test_human_text_drops_suggestion_and_warmup_forks() -> None:
+    """CC autocomplete (SUGGESTION MODE) and cache-warmup (Warmup) forks are injected, not directives.
+
+    Surfaced as the top fork-direct leaks (295 + 169) by the corpus audit. Warmup is matched exactly,
+    not as a prefix, so a real 'Warmup the cache' main directive still survives.
+    """
+    suggestion = TranscriptRecord.model_validate(
+        {'type': 'user', 'message': {'content': '[SUGGESTION MODE: Suggest what the user might type next...]'}}
+    )
+    warmup = TranscriptRecord.model_validate({'type': 'user', 'message': {'content': 'Warmup'}})
+    real_directive = TranscriptRecord.model_validate(
+        {'type': 'user', 'message': {'content': 'Warmup the cache please'}}
+    )
+    assert human_text(suggestion) == ''
+    assert human_text(warmup) == ''
+    assert human_text(real_directive) == 'Warmup the cache please'
